@@ -9,6 +9,7 @@ from numpy import array
 # Element dictionaries
 
 elements = { 1 : "H", 6 : "C", 7 : "N" }
+xsf_keywords = ["ANIMSTEPS", "CRYSTAL", "ATOMS", "PRIMVEC", "PRIMCOORD"]
 
 def getElementZ(elstr):
     """ Z = getElementZ(elstr)
@@ -131,121 +132,42 @@ class Atoms:
         f = open(xsf_file)
         if not f:
             raise ESCError("File %s could not be opened - exiting.")
-        else:
-            lines = f.readlines()
-            f.close()
-            nocoms = []
-            # First remove all comment and blank lines
-            for line in lines:
-                if not (line.strip().startswith('#') or line.strip() == ""):
-                    nocoms.append(line)
-            
-            # Decide if we are animated and whether we are a crystal
-            # or a molecule.
-            start = 0
-            if nocoms[start].split()[0] == "ANIMSTEPS":
-                self.nsteps = int(nocoms[0].split()[1])
-                start = 1
-            
-            if nocoms[start].split()[0] == "CRYSTAL":
+        
+        lines = f.readlines()
+        f.close()
+        data = []
+        # First remove all comment and blank lines
+        for line in lines:
+            if not (line.strip().startswith('#') or line.strip() == ""):
+                data.append(line)
+        
+        keywords = []
+        blocks = []
+                
+        # Locate all keywords
+        for i, line in enumerate(data):
+            bits = line.split()
+            for kw in xsf_keywords:
+                if kw in bits:
+                    keywords.append(kw)
+                    blocks.append(i)
+        
+        # Cycle through the keywords and deal with each block.
+        for i, (s, kw) in enumerate(zip(blocks, keywords)):
+            if kw is "ANIMSTEPS":
+                self.nsteps = int(data[s].split()[1])
+            if kw is "CRYSTAL":
                 self.is_crystal = True
-                start = 2
-            else:
-                start = 1
-                           
-            # It is not true that if we're not a crystal we're a molecule,
-            # however we will assume it is since the other cases (SLAB, etc
-            # ) are not seen very often and we can always change later.
-            
-            j = start
-            i = 1
-            
-            if self.is_crystal:
-                # Loop over lines and pull out each animation step.
-                # Note that we don't care about CONVVEC or CONVCOORDS
-                # here - if PRIMVEC/PRIMCOORD aren't specified, we
-                # aren't playing.
-                while j < len(nocoms):
-                    bits = nocoms[j].split()
-                    if bits[0] == "PRIMVEC":
-                        # Check we're in step with the current animation step.
-                        if self.nsteps > 1:
-                            if int(bits[1]) is not i:
-                                raise ESCError("Crystal Init", "It looks like the animation steps are out of order in the XSF file, or there are missing steps. Exiting...")
-                        # Read and store the lattice coords.
-                        print "Got here!"
-                        a = ang2bohr(array([float(x) for x in nocoms[j+1].split()[0:3]]))          
-                        b = ang2bohr(array([float(x) for x in nocoms[j+2].split()[0:3]]))
-                        c = ang2bohr(array([float(x) for x in nocoms[j+3].split()[0:3]]))
-                        self.lattice.append([a, b, c])
-                        j += 4
-                    elif bits[0] == "PRIMCOORD":
-                        # Check we're in sync.
-                        if self.nsteps > 1:
-                            if int(bits[1]) is not i:
-                                raise ESCError("Crystal Init", "It looks like the animation steps are out of order in the XSF file, or there are missing steps. Exiting...")
-                        # Read number of atoms and use that to grab the coords
-                        # Also we might possibly get forces included here.
-                        jstep = int(nocoms[j+1].split()[0])
-                        curspecies = []
-                        curpos = []
-                        curforce = []
-                        for k in range(jstep):
-                            dline = nocoms[j+2+k].split()
-                            z = dline[0]
-                            curspecies.append(getElementZ(z))
-                            pos = ang2bohr(array([float(x) for x in dline[1:4]]))
-                            curpos.append(pos)
-                            # Try to read forces
-                            try:
-                                # Note: XSF forces are in angstrom / Ha (??) so 
-                                # must convert only the angstrom part.
-                                force = ang2bohr(array([float(x) for x in dline[4:7]]))
-                                curforce.append(force)
-                            except (ValueError, NameError):
-                                curforce.append(array([0.0, 0.0, 0.0]))
-                            
-                        self.positions.append(curpos)
-                        self.forces.append(curforce)
-                        self.species.append(curspecies)
-                        j += jstep + 1
-                        i += 1
-                    else:
-                        j += 1
-            else:
-                # We aren't a crystal. There is no atom index, we just have to
-                # chomp lines until we catch another ATOMS marker.
-                
-                curspecies = []
-                curpos = []
-                curforce = []
-                
-                while j < len(nocoms):
-                    bits = nocoms[j].split()
-                    if bits[0] == "ATOMS":
-                        # Check animation step
-                        if int(bits[1]) is not i:
-                            raise ESCError("Molecule Init", "It looks like the animation steps are out of order in the XSF file, or there are missing steps. Exiting...")
-                        if curspecies:
-                            self.species.append(curspecies)
-                            self.positions.append(curpos)
-                            self.forces.append(curforce)
-                        curspecies = []
-                        curpos = []
-                        curforce = []
-                        i += 1
-                        j += 1
-                    else:
-                        z = bits[0]
-                        curspecies.append(getElementZ(z))
-                        pos = ang2bohr(array([float(x) for x in bits[1:3]]))
-                        curpos.append(pos)
-                        try:
-                            force = ang2bohr(array([float(x) for x in bits[4:7]]))
-                            curforce.append(force)
-                        except (ValueError, NameError):
-                            curforce.append(array([0.0, 0.0, 0.0]))
-                        
-                        j += 1
-    
-
+            if kw is "PRIMVEC":
+                a = array([float(x) for x in data[s+1].split()[0:3]])
+                b = array([float(x) for x in data[s+2].split()[0:3]]) 
+                c = array([float(x) for x in data[s+3].split()[0:3]])
+                self.lattice.append([a, b, c])
+            if kw is "PRIMCOORD":
+                nat = int(data[s+1].split()[0])
+                positions = []
+                forces = []
+                species = []
+                for j in range(nat):
+                    species.append(getElementZ(data[s+1+j].split()[0]))
+                    positions.append(array([float(x)
