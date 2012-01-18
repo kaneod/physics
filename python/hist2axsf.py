@@ -9,8 +9,8 @@ def bohr2ang(bohr):
 def ang2bohr(ang):
     return ang / 0.529177249
 
-infilename = "/home/kane/Desktop/poro_HIST"
-outfilename = "/home/kane/Desktop/out.axsf"
+infilename = "/home/kane/Desktop/Scratch/poro_HIST"
+outfilename = "/home/kane/Desktop/Scratch/out.axsf"
 
 # Ideally want to read this automatically in the future, but for now, blah.
 ntypat = array([6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, \

@@ -4,7 +4,33 @@
 # (bohr, hartree, etc) and provide converter routines
 # to deal with other common units such as ang and eV.
 
-from numpy import *
+from numpy import array
+
+# Element dictionaries
+
+elements = { 1 : "H", 6 : "C", 7 : "N" }
+
+def getElementZ(elstr):
+    """ Z = getElementZ(elstr)
+    
+    Given a string that contains either a Z number OR an element
+    abbreviation like Cu, MG, whatever, generates and returns the
+    appropriate integer Z.
+    """
+    
+    # Is it an integer?
+    try:
+        Z = int(elstr)
+        return Z
+    except ValueError:
+        # Not an integer.
+        if elstr.title() not in elements.values():
+            raise ESCError("getELementZ", "Element %s is not in the elements dictionary. Returning -1." % elstr)
+            return -1
+        else:
+            for key, value in elements.items():
+                if elstr.title() == value:
+                    return key
 
 def bohr2ang(bohr):
     """ ang = bohr2ang(bohr)
@@ -24,7 +50,7 @@ def ang2bohr(ang):
     
     return ang / 0.52917721092
 
-def eV2hartree(eV)
+def eV2hartree(eV):
     """ hartree = eV2hartree(eV)
     
     Converts eV to hartree, conversion factor 1 Ht = 27.21138505 eV
@@ -33,7 +59,7 @@ def eV2hartree(eV)
     
     return eV / 27.21138505
     
-def hartree2eV(hartree)
+def hartree2eV(hartree):
     """ eV = hartree2eV(hartree)
     
     Converts hartree to eV, conversion factor 1 eV = 1.0 / 27.21138505 Ht
@@ -42,7 +68,7 @@ def hartree2eV(hartree)
     
     return hartree * 27.21138505
     
-def uniqify(sequence)
+def uniqify(sequence):
     """ unique = uniqify(sequence, trans)
     
     Produces an order-preserved list of unique elements in the passed
@@ -68,140 +94,158 @@ class ESCError(Exception):
     def __init__(self, expr, msg):
         self.expr = expr
         self.msg = msg
+        print expr
+        print msg
     
-class Structure:
-    """ Superclass representing a structure (crystal, molecule, etc).
+class Atoms:
+    """ Atoms class: a collection of atoms (possibly with a crystal structure)
     
-    Remember - all internal variables are in Hartree atomic units.
+    Create using Atoms(xsf_file), Atoms(xyz_file), Atoms(abinit_input), etc.
     
     """
     
-    species = []
-    positions_cart = []             # Elements expected to be numpy arrays.
+    nsteps = 1                  # > 1 if object has time-series data
+                                # (ie is animated)
+    is_crystal = False          # True if we expect to have lattice vectors
+    lattice = []                # List of lists of 3 vectors.
+    positions = []              # List of lists of atomic positions.
+    forces = []                 # Same for forces...
+    species = []                # and species.
+                               
     
-    def __init__(self, species, positions, units="bohr"):
-        """ struct = Structure(species, positions, units="bohr")
+    def __init__(self, xsf_file):
+        """ atoms = Atoms(xsf_file)
         
-        Returns a Structure object just by setting species and positions
-        lists directly. Only checks the lengths of each list are the same.
-        
-        """
-        
-        if len(species) != len(positions):
-            raise ESCError("Total atoms in species (%d) does not match \
-            the number of positions (%d)" % (len(species), len(positions)))
-        else:
-            self.species = species
-            if units == "ang":
-                self.positions = [ang2bohr(x) for x in positions]
-            else:
-                self.positions = positions
-        
-    
-    def __init__(self, species_spec, positions, units="bohr"):
-        """ struct = Structure(species_spec, positions, units="bohr")
-        
-        Returns a Structure object generated from a species specification
-        and a list of positions. Each element of the species_spec list contains
-        a list of two elements:
-        
-        species_spec = [[n1, Z1], [n2, Z2], ...]
-        
-        The positions are then assigned such that the first n1 positions are
-        of species Z1 and so on.
-        
-        If units is "ang", the positions are converted to bohr before storage.
+        Creates an Atoms object from an xsf file. Note that we can deal with
+        animated (AXSF) files just fine.
         
         """
         
-        self.set_species_spec(species_spec, positions, units)
-                
-    
-    def set_species_spec(self, species_spec, positions, units="bohr"):
-        """ Structure.set_species_spec(species_spec, positions, units="bohr")
-        
-        Sets a Structure object to a species specification
-        and a list of positions. Each element of the species_spec list contains
-        a list of two elements:
-        
-        species_spec = [[n1, Z1], [n2, Z2], ...]
-        
-        The positions are then assigned such that the first n1 positions are
-        of species Z1 and so on.
-        
-        If units is "ang", the positions are converted to bohr before storage.
-        
-        """
-        
-        
-        # Check correct sized inputs.
-        total_atoms=0
-        for spec in species_spec:
-            total_atoms += spec[0]
-        
-        if total_atoms != len(positions):
-            raise ESCError("Total atoms in species_spec (%d) does not match \
-            the number of positions (%d)" % (total_atoms, len(positions)))
-        else:
-            self.species = []
-            self.positions_cart = []
-            for spec in species_spec:
-                self.species += spec[0] * [spec[1]]
-            if units=="ang":
-                self.positions_cart = [bohr2ang(x) for x in positions]  
-                  
-    
-    def __init__(self, position_spec, units="bohr"):
-        """ struct = Structure(position_spec, units="bohr")
-        
-        Returns a Structure object generated from a position specification. 
-        Each element of position_spec is a list:
-        
-        position_spec = [[Z1, array(R1)], ...]
-        
-        If units is "ang", the positions are converted to bohr before storage.
-        
-        """
-        
-        self.set_position_spec(position_spec, units)
-                
-    def set_position_spec(self, position_spec, units="bohr"):
-        """
-        
-        Sets the structure to the given position spec.
-        Each element of position_spec is a list:
-        
-        position_spec = [[Z1, array(R1)], ...]
-        
-        If units is "ang", the positions are converted to bohr before storage.
-        
-        """
-        
+        # Destroy our current data
+        self.is_crystal = False
+        self.lattice = []
+        self.positions = []
+        self.forces = []
         self.species = []
-        self.positions_cart = []
         
-        for pos in position_spec:
-            self.species.append(pos[0])
-            if units=="ang":
-                self.positions_cart.append(ang2bohr(pos[1]))
-            else:
-                self.positions_cart.append(pos[1])
-          
+        f = open(xsf_file)
+        if not f:
+            raise ESCError("File %s could not be opened - exiting.")
+        else:
+            lines = f.readlines()
+            f.close()
+            nocoms = []
+            # First remove all comment and blank lines
+            for line in lines:
+                if not (line.strip().startswith('#') or line.strip() == ""):
+                    nocoms.append(line)
             
-    def ang_positions(self):
-        return [bohr2ang(x) for x in self.positions_cart]
-    
-class Crystal(Structure):
-    """ A crystal is just a structure along with a lattice.
-    
-    """
-    
-    lattice_cart = []
-    
-    def __init__(self, lattice, units="bohr"):
-        """ crystal = Crystal(lattice, units="bohr")
-        
-        Generates a (empty) Crystal object using the specified lattice.
-        The lattice object should be 
+            # Decide if we are animated and whether we are a crystal
+            # or a molecule.
+            start = 0
+            if nocoms[start].split()[0] == "ANIMSTEPS":
+                self.nsteps = int(nocoms[0].split()[1])
+                start = 1
+            
+            if nocoms[start].split()[0] == "CRYSTAL":
+                self.is_crystal = True
+                start = 2
+            else:
+                start = 1
+                           
+            # It is not true that if we're not a crystal we're a molecule,
+            # however we will assume it is since the other cases (SLAB, etc
+            # ) are not seen very often and we can always change later.
+            
+            j = start
+            i = 1
+            
+            if self.is_crystal:
+                # Loop over lines and pull out each animation step.
+                # Note that we don't care about CONVVEC or CONVCOORDS
+                # here - if PRIMVEC/PRIMCOORD aren't specified, we
+                # aren't playing.
+                while j < len(nocoms):
+                    bits = nocoms[j].split()
+                    if bits[0] == "PRIMVEC":
+                        # Check we're in step with the current animation step.
+                        if self.nsteps > 1:
+                            if int(bits[1]) is not i:
+                                raise ESCError("Crystal Init", "It looks like the animation steps are out of order in the XSF file, or there are missing steps. Exiting...")
+                        # Read and store the lattice coords.
+                        print "Got here!"
+                        a = ang2bohr(array([float(x) for x in nocoms[j+1].split()[0:3]]))          
+                        b = ang2bohr(array([float(x) for x in nocoms[j+2].split()[0:3]]))
+                        c = ang2bohr(array([float(x) for x in nocoms[j+3].split()[0:3]]))
+                        self.lattice.append([a, b, c])
+                        j += 4
+                    elif bits[0] == "PRIMCOORD":
+                        # Check we're in sync.
+                        if self.nsteps > 1:
+                            if int(bits[1]) is not i:
+                                raise ESCError("Crystal Init", "It looks like the animation steps are out of order in the XSF file, or there are missing steps. Exiting...")
+                        # Read number of atoms and use that to grab the coords
+                        # Also we might possibly get forces included here.
+                        jstep = int(nocoms[j+1].split()[0])
+                        curspecies = []
+                        curpos = []
+                        curforce = []
+                        for k in range(jstep):
+                            dline = nocoms[j+2+k].split()
+                            z = dline[0]
+                            curspecies.append(getElementZ(z))
+                            pos = ang2bohr(array([float(x) for x in dline[1:4]]))
+                            curpos.append(pos)
+                            # Try to read forces
+                            try:
+                                # Note: XSF forces are in angstrom / Ha (??) so 
+                                # must convert only the angstrom part.
+                                force = ang2bohr(array([float(x) for x in dline[4:7]]))
+                                curforce.append(force)
+                            except (ValueError, NameError):
+                                curforce.append(array([0.0, 0.0, 0.0]))
+                            
+                        self.positions.append(curpos)
+                        self.forces.append(curforce)
+                        self.species.append(curspecies)
+                        j += jstep + 1
+                        i += 1
+                    else:
+                        j += 1
+            else:
+                # We aren't a crystal. There is no atom index, we just have to
+                # chomp lines until we catch another ATOMS marker.
+                
+                curspecies = []
+                curpos = []
+                curforce = []
+                
+                while j < len(nocoms):
+                    bits = nocoms[j].split()
+                    if bits[0] == "ATOMS":
+                        # Check animation step
+                        if int(bits[1]) is not i:
+                            raise ESCError("Molecule Init", "It looks like the animation steps are out of order in the XSF file, or there are missing steps. Exiting...")
+                        if curspecies:
+                            self.species.append(curspecies)
+                            self.positions.append(curpos)
+                            self.forces.append(curforce)
+                        curspecies = []
+                        curpos = []
+                        curforce = []
+                        i += 1
+                        j += 1
+                    else:
+                        z = bits[0]
+                        curspecies.append(getElementZ(z))
+                        pos = ang2bohr(array([float(x) for x in bits[1:3]]))
+                        curpos.append(pos)
+                        try:
+                            force = ang2bohr(array([float(x) for x in bits[4:7]]))
+                            curforce.append(force)
+                        except (ValueError, NameError):
+                            curforce.append(array([0.0, 0.0, 0.0]))
+                        
+                        j += 1
     
 
