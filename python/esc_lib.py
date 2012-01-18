@@ -169,5 +169,32 @@ class Atoms:
                 forces = []
                 species = []
                 for j in range(nat):
-                    species.append(getElementZ(data[s+1+j].split()[0]))
-                    positions.append(array([float(x)
+                    bits = data[s+2+j].split()
+                    species.append(getElementZ(bits[0]))
+                    positions.append(array([float(x) for x in bits[1:4]]))
+                    try:
+                        forces.append(array([float(x) for x in bits[4:7]]))
+                    except (ValueError, IndexError):
+                        forces.append(array([0.0, 0.0, 0.0]))
+                self.positions.append(positions)
+                self.forces.append(forces)
+                self.species.append(species)
+            if kw is "ATOMS":
+                positions = []
+                forces = []
+                species = []
+                try:
+                    s1 = blocks[i+1]
+                except (IndexError):
+                    s1 = len(data)
+                for j in range(s+1, s1):
+                    bits = data[j].split()
+                    species.append(getElementZ(bits[0]))
+                    positions.append(array([float(x) for x in bits[1:4]]))
+                    try:
+                        forces.append(array([float(x) for x in bits[4:7]]))
+                    except (ValueError, IndexError):
+                        forces.append(array([0.0, 0.0, 0.0]))
+                self.positions.append(positions)
+                self.forces.append(forces)
+                self.species.append(species)
