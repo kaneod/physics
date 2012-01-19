@@ -13,9 +13,9 @@ infilename = "/home/kane/Desktop/Scratch/poro_HIST"
 outfilename = "/home/kane/Desktop/Scratch/out.axsf"
 
 # Ideally want to read this automatically in the future, but for now, blah.
-ntypat = array([6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, \
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
-
+#ntypat = array([6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, \
+#            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+ntypat = array(48*[6] + 4 * [7] + 38 * [1])
 infile = NetCDF.NetCDFFile(infilename, 'r')
 print "Opened NetCDF file %s for reading." % infilename
 outfile = open(outfilename, 'w')
