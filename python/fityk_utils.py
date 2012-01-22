@@ -4,12 +4,16 @@
 
 from numpy import array, zeros, max
 
-def scale(infile, outfile=None, scale=None, shift=0.0):
+def scale(infile, outfile=None, scale=None, shift=0.0, multi_offset=None):
     """ scaled = scale(infile, outfile=None, scale=None, shift=0.0)
     
     Opens infile, assumed to be a commentless multicolumn xy text file (ie, exactly what
     fityk exports). Scales and shifts according to the inputs, default is  normalize to 
     unit maximum. Default output name is the same as the infile with a .scaled suffix.
+    
+    If multi_offset is not None, will separately shift columns 1 and -1 by the value
+    of multi_offset. This is so you can separate components of the peak fits from the
+    data and actual fits.
     
     """
     
@@ -37,8 +41,14 @@ def scale(infile, outfile=None, scale=None, shift=0.0):
     scaled[:,0] = data[:,0]
     
     for i in range(1, data.shape[1]):
-        scaled[:,i] = data[:,i] / peak + shift
-    
+        if multi_offset is None:
+            scaled[:,i] = data[:,i] / peak + shift
+        else:
+            if i in [1, (data.shape[1]-1)]:
+                scaled[:,i] = data[:,i] / peak + multi_offset
+            else:
+                scaled[:,i] = data[:,i] / peak + shift
+            
     if outfile is None:
         f = open(infile+".scaled", 'w')
     else:
