@@ -6,6 +6,7 @@
 
 from numpy import array, zeros
 from numpy.linalg import norm
+from Scientific.IO import NetCDF
 
 # Element dictionaries
 
@@ -244,7 +245,7 @@ class Atoms:
     positions = []              # List of lists of atomic positions.
     forces = []                 # Same for forces...
     species = []                # and species.
-                               
+                                            
     
     def __init__(self, xsf_file):
         """ atoms = Atoms(xsf_file)
