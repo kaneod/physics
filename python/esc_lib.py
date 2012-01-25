@@ -3,10 +3,9 @@
 # Note that internally we *always* use atomic units
 # (bohr, hartree, etc) and provide converter routines
 # to deal with other common units such as ang and eV.
-
+from __future__ import division
 from numpy import array, zeros, sqrt
 from numpy.linalg import norm
-from Scientific.IO import NetCDF
 
 # Element dictionaries
 
@@ -82,8 +81,8 @@ def remove_comments(lines, comment_delim):
         if not (line.strip().startswith(comment_delim) or line.strip() == ""):
             stripped.append(line.partition(comment_delim)[0].strip())
     
-    return stripped        
- 
+    return stripped
+    
 def abinit_parse(istr):
     """ result = abinit_parse(istr)
     
@@ -97,55 +96,15 @@ def abinit_parse(istr):
     
     """
     
-    def rfloat(rstr):
-        for i in range(len(rstr)):
-            cur = rstr[:-i]
-            tail = rstr[-i:len(rstr)]
-            try:
-                return float(cur), tail
-            except ValueError:
-                pass       
-        return None
-        
-    def lfloat(lstr):
-        for i in range(len(lstr)):
-            cur = lstr[i:]
-            tail = lstr[0:i]
-            try:
-                return float(cur), tail
-            except ValueError:
-                pass
-        return None
-
-    cur = istr.lower()
-    if "/" in cur:
-        numerator, lbit = lfloat(cur.partition("/")[0])
-        denominator, rbit = rfloat(cur.partition("/")[2])
-        cur = lbit + str(numerator / denominator) + rbit
-        
-    # Now search for sqrts
-    if "sqrt" in cur:
-        pre = cur.partition("sqrt")[0]
-        prt = cur.partition("sqrt")[2]
-        # Remainder should just have the form ( float )
-        subject = float(prt.strip().strip("()"))
-        cur = pre + str(sqrt(subject))
-    else:
-        # Remove goody-goody brackets
-        
-        
-    # Now all that is left is the possibility of a multiple or
-    # a fill token, or goody-goody brackets.
-    if "*" in cur:
-        factor = cur.partition("*")[0].strip().strip("()")
-        value = float(cur.partition("*")[2].strip().strip("()"))
+    if "*" in istr.lower():
+        factor = istr.lower().partition("*")[0].strip()
+        operand = eval(istr.lower().partition("*")[2])
         if factor is "":
-            return "fill", value
+            return "fill", operand
         else:
-            return "multiple", int(factor) * [value]
+            return "multiple", int(factor) * [operand]
     else:
-        return "single", float(cur.strip().strip("()"))
-        
+        return "single", eval(istr.lower())
                 
 def abinit_value(data, keyword, nvalues):
     """ value = abinit_value(data, keyword, nvalues)
@@ -405,6 +364,9 @@ class Atoms:
         data = remove_comments(lines, "#")
         data = remove_comments(lines, "!")
         data = " ".join(data).split()
+        
+        # Alrighty. Get the number and type of atoms, then generate our species
+        # list.
         
         
     def __init__(self, xsf_file):
