@@ -4,7 +4,7 @@
 # (bohr, hartree, etc) and provide converter routines
 # to deal with other common units such as ang and eV.
 
-from numpy import array, zeros
+from numpy import array, zeros, sqrt
 from numpy.linalg import norm
 from Scientific.IO import NetCDF
 
@@ -62,6 +62,142 @@ def getBondLengths(positions, species, cutoff=3.0, give_species=False):
         
         return bonds
 
+def remove_comments(lines, comment_delim):
+    """ stripped = remove_comments(lines, comment_delim)
+    
+    Takes a sequence of lines (presumably from a data file)
+    and strips all comments, including ones at the end of
+    lines that are otherwise not comments. Note that we can
+    only deal with one kind of comment at a time - just apply
+    multiple times to strip multiple comment types.
+    
+    Note that we also remove *blank* lines in here, just in
+    case we're going to do line-by-line processing subsequently
+    rather than join/splitting (eg. like for XSF files).
+    
+    """
+    
+    stripped = []
+    for line in lines:
+        if not (line.strip().startswith(comment_delim) or line.strip() == ""):
+            stripped.append(line.partition(comment_delim)[0].strip())
+    
+    return stripped        
+ 
+def abinit_parse(istr):
+    """ result = abinit_parse(istr)
+    
+    Tries to parse a string according to abinit input file
+    rules. There are only three symbols (*, / and sqrt).
+    Returns a result list, possible results are "single",
+    for a single data value contained in result[1], "multiple",
+    for a list of data values contained in result[1],
+    or "fill", for a single data value in result[1] that
+    is meant to fill a whole array.
+    
+    """
+    
+    def rfloat(rstr):
+        for i in range(len(rstr)):
+            cur = rstr[:-i]
+            tail = rstr[-i:len(rstr)]
+            try:
+                return float(cur), tail
+            except ValueError:
+                pass       
+        return None
+        
+    def lfloat(lstr):
+        for i in range(len(lstr)):
+            cur = lstr[i:]
+            tail = lstr[0:i]
+            try:
+                return float(cur), tail
+            except ValueError:
+                pass
+        return None
+
+    cur = istr.lower()
+    if "/" in cur:
+        numerator, lbit = lfloat(cur.partition("/")[0])
+        denominator, rbit = rfloat(cur.partition("/")[2])
+        cur = lbit + str(numerator / denominator) + rbit
+        
+    # Now search for sqrts
+    if "sqrt" in cur:
+        pre = cur.partition("sqrt")[0]
+        prt = cur.partition("sqrt")[2]
+        # Remainder should just have the form ( float )
+        subject = float(prt.strip().strip("()"))
+        cur = pre + str(sqrt(subject))
+    else:
+        # Remove goody-goody brackets
+        
+        
+    # Now all that is left is the possibility of a multiple or
+    # a fill token, or goody-goody brackets.
+    if "*" in cur:
+        factor = cur.partition("*")[0].strip().strip("()")
+        value = float(cur.partition("*")[2].strip().strip("()"))
+        if factor is "":
+            return "fill", value
+        else:
+            return "multiple", int(factor) * [value]
+    else:
+        return "single", float(cur.strip().strip("()"))
+        
+                
+def abinit_value(data, keyword, nvalues):
+    """ value = abinit_value(data, keyword, nvalues)
+    
+    Using the raw abinit data stream, parses the value of the
+    given keyword. Because abinit allows rudimentary mathematical
+    expressions in the input file, we have to actually parse data
+    in most cases rather than just read and convert it. Darn. 
+    
+    Because we have to parse, we *must* know how many values
+    we are looking for. Note that we are also merciless about
+    whitespace here - if abinit would misread the input file,
+    so will we.
+    
+    Note that we always read numerical values as floats - 
+    
+    """
+    
+    value = []
+    # The action starts at the index of the keyword.
+    try:
+        start = data.index(keyword)
+    except ValueError:
+        raise ESCError("abinit_value", "The keyword %s was not found in the given abinit data" % keyword)
+        return None
+    
+    # Since we don't know how many bits will unpack into
+    # the required nvalues items, we need to possible loop
+    # over all of them...
+    for i, d in enumerate(data[start+1:]):
+        try:
+            val = float(d)
+            value.append(val)
+        except ValueError:
+            # Need to parse this one.
+            result = abinit_parse(d)
+                
+            
+def chop128(in_string):
+    """ out_string = chop128(in_string)
+    
+    The abinit input file format requires that each individual
+    line be less than 132 characters long otherwise it ignores
+    the rest of the input.
+    
+    NOTE: Not clear if we need to code this yet, waiting for
+    confirmation from abinit devs. For now doesn't do anything.
+    
+    """
+    
+    return in_string
+    
 def write_xsf(filename, positions, species, lattice=None):
     """ succeeded = write_xsf(filename, positions, species, lattice=None)
     
@@ -246,7 +382,31 @@ class Atoms:
     forces = []                 # Same for forces...
     species = []                # and species.
                                             
-    
+    def __init__(self, abinit_input):
+        """ atoms = Atoms(xsf_file)
+        
+        Creates an Atoms object from an abinit input file. We are sneaky
+        here and take the default values to be the abinit defaults (in 
+        case the input file leaves things out).
+        
+        """
+        
+        # Destroy current data
+        self.is_crystal = True      # Always true for abinit
+        self.lattice = []
+        self.positions = []
+        self.forces = []
+        self.species = []
+        
+        f = open(abinit_input, 'r')
+        lines = f.readlines()
+        f.close()
+        
+        data = remove_comments(lines, "#")
+        data = remove_comments(lines, "!")
+        data = " ".join(data).split()
+        
+        
     def __init__(self, xsf_file):
         """ atoms = Atoms(xsf_file)
         
@@ -268,11 +428,8 @@ class Atoms:
         
         lines = f.readlines()
         f.close()
-        data = []
-        # First remove all comment and blank lines
-        for line in lines:
-            if not (line.strip().startswith('#') or line.strip() == ""):
-                data.append(line)
+        
+        data = remove_comments(lines, "#")
         
         keywords = []
         blocks = []
