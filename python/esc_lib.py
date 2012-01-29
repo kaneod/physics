@@ -4,7 +4,7 @@
 # (bohr, hartree, etc) and provide converter routines
 # to deal with other common units such as ang and eV.
 from __future__ import division
-from numpy import array, zeros, sqrt
+from numpy import array, zeros, sqrt, reshape
 from numpy.linalg import norm
 
 # Element dictionaries
@@ -96,18 +96,30 @@ def abinit_parse(istr):
     
     """
     
+    # Note the use of the {'sqrt' : sqrt} in the eval
+    # statements: this is to restrict the namespace
+    # available in the eval function so we don't get
+    # a namespace overlap which would happily eval
+    # a named variable, causing a logic error.
+    
     if "*" in istr.lower():
         factor = istr.lower().partition("*")[0].strip()
-        operand = eval(istr.lower().partition("*")[2])
+        try:
+            operand = float(eval(istr.lower().partition("*")[2], {'sqrt' : sqrt}))
+        except NameError:
+            return "nonsense", istr.lower().partition("*")[2]
         if factor is "":
             return "fill", operand
         else:
             return "multiple", int(factor) * [operand]
     else:
-        return "single", eval(istr.lower())
+        try: 
+            return "single", float(eval(istr.lower(), {'sqrt' : sqrt}))
+        except NameError:
+            return "non-value", istr.lower()
                 
 def abinit_value(data, keyword, nvalues):
-    """ value = abinit_value(data, keyword, nvalues)
+    """ values = abinit_value(data, keyword, nvalues)
     
     Using the raw abinit data stream, parses the value of the
     given keyword. Because abinit allows rudimentary mathematical
@@ -123,12 +135,12 @@ def abinit_value(data, keyword, nvalues):
     
     """
     
-    value = []
+    values = []
     # The action starts at the index of the keyword.
     try:
         start = data.index(keyword)
     except ValueError:
-        raise ESCError("abinit_value", "The keyword %s was not found in the given abinit data" % keyword)
+        print "abinit_value WARNING: keyword %s is not in the specified data stream." % keyword
         return None
     
     # Since we don't know how many bits will unpack into
@@ -137,10 +149,97 @@ def abinit_value(data, keyword, nvalues):
     for i, d in enumerate(data[start+1:]):
         try:
             val = float(d)
-            value.append(val)
+            values.append(val)
         except ValueError:
             # Need to parse this one.
             result = abinit_parse(d)
+            if result[0] is "single":
+                values.append(result[1])
+            elif result[0] is "multiple":
+                values = values + result[1]
+            elif result[0] is "fill":
+                remaining = nvalues - len(values)
+                values = values + remaining * [result[1]]
+                return values
+        if len(values) is nvalues:
+            return values
+            
+    # If we get to here, we must not have enough values. Better raise an error.
+
+def abinit_unit(data, keyword):
+    """ unit = abinit_unit(data, keyword)
+    
+    Returns the next non-value item after the appearance
+    of keyword. At the moment recognizes:
+    
+    "ry", "angstr", "angstrom", "k", "ev", "ha", "bohr"
+    "hartree"
+    
+    and is case insensitive. 
+    
+    If a unit is recognized it is returned in the form used
+    in this library (ang, eV, etc), otherwise None is returned.
+    
+    """
+    
+    try:
+        start = data.index(keyword)
+    except ValueError:
+        raise ESCError("abinit_value", "The keyword %s was not found in the given abinit data" % keyword)
+        return None
+    
+    for i, d in enumerate(data[start+1:]):
+        result = abinit_parse(d)
+        if result[0] is "non-value":
+            if result[1] is ("angstrom" or "angstr"):
+                return "ang"
+            elif result[1] is "ev":
+                return "eV"
+            elif result[1] is "bohr":
+                return "bohr"
+            elif result[1] is ("ha" or "hartree"):
+                return "hartree"
+            elif result[1] is "k":
+                return "K"
+            elif result[1] is "ry":
+                return "Ry"
+            else:
+                return None
+    return None
+
+def abinit_int(data, keyword, nvalues):
+    """ values = abinit_int(data, keyword, nvalues)
+    
+    This is just a convenience function that converts a list
+    of floats returned by abinit_value into ints. If the list
+    only has one member, it returns the integer rather than 
+    the list.
+    
+    """
+    
+    vals = abinit_value(data, keyword, nvalues)
+    
+    if len(vals) is 1:
+        return int(vals[0])
+    else:
+        return [int(x) for x in vals]
+        
+def abinit_array(data, keyword, nvalues, newshape=None):
+    """ values = abinit_array(data, keyword, nvalues, newshape=None)
+    
+    Convenience function that wraps abinit_value but
+    returns a numpy array shaped according to the newshape input.
+    
+    If newshape is left blank, the array is shaped to be n x 3
+    (rows x columns) where n = nvalues / 3
+    """
+    
+    vals = array(abinit_value(data, keyword, nvalues))
+    
+    if newshape is None:
+        return reshape(vals, (3,))
+    else:
+        return reshape(vals, newshape)
                 
             
 def chop128(in_string):
@@ -340,13 +439,33 @@ class Atoms:
     positions = []              # List of lists of atomic positions.
     forces = []                 # Same for forces...
     species = []                # and species.
-                                            
-    def __init__(self, abinit_input):
-        """ atoms = Atoms(xsf_file)
+    
+    def __init__(self, filename, filetype="XSF"):
+        """ atoms = Atoms(filename, filetype="XSF")
         
-        Creates an Atoms object from an abinit input file. We are sneaky
-        here and take the default values to be the abinit defaults (in 
-        case the input file leaves things out).
+        Creates an Atoms object from some input file. You have to
+        specify the type of file here. Can be:
+        
+        "XSF" : XCrysden Structure Format, can also be animated axsf.
+        
+        "abinit" : Abinit input file.
+        
+        """
+        
+        if filetype is "XSF":
+            self.loadFromXSF(filename)
+        elif filetype is "abinit":
+            self.loadFromAbinit(filename)
+        
+        
+                                            
+    def loadFromAbinit(self, abinit_input):
+        """ atoms = Atoms.loadFromAbinit(abinit_input)
+        
+        Internal, inits an Atoms object from an abinit input file. We
+        only allow default values for rprim - input files must contain:
+        
+        natom, ntypat, typat, znucl, acell, [xangst, xred, xcart]
         
         """
         
@@ -367,12 +486,27 @@ class Atoms:
         
         # Alrighty. Get the number and type of atoms, then generate our species
         # list.
+        n = abinit_int(data, "natom", 1)
+        ntypat = abinit_int(data, "ntypat", 1)
+        znucl = abinit_int(data, "znucl", ntypat)
+        typat = abinit_int(data, "typat", n)
+        
+        # Double brackets because species, positions, etc are all timestep-friendly.
+        self.species = [[znucl[x-1] for x in typat]]
+        
+        acell = abinit_value(data, "acell", 3)
+        acell_unit = abinit_unit(data, "acell")
+        rprim = abinit_array(data, "rprim", 9)
+        
+        print acell
+        print acell_unit
+        print rprim
         
         
-    def __init__(self, xsf_file):
-        """ atoms = Atoms(xsf_file)
+    def loadFromXSF(self, xsf_file):
+        """ atoms = Atoms.loadFromXSF(xsf_file)
         
-        Creates an Atoms object from an xsf file. Note that we can deal with
+        Internal, inits an Atoms object from an xsf file. Note that we can deal with
         animated (AXSF) files just fine.
         
         """

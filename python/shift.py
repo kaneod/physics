@@ -10,7 +10,7 @@ infile = "/home/kane/Desktop/raw.dat"
 outfile = "/home/kane/Desktop/shifted.dat"
 
 # Shift vector
-shift = array([7.5, 7.5, 5])
+shift = array([4.0, 4.0, 2.0])
 
 # Data array
 data = []
