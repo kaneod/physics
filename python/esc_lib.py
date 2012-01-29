@@ -9,7 +9,7 @@ from numpy.linalg import norm
 
 # Element dictionaries
 
-elements = { 1 : "H", 6 : "C", 7 : "N" }
+elements = { 1 : "H", 2 : "He", 3 : "Li",  6 : "C", 7 : "N" , 8 : "O"}
 xsf_keywords = ["ANIMSTEPS", "CRYSTAL", "ATOMS", "PRIMVEC", "PRIMCOORD"]
 bond_lengths = {"CH" : 2.06, "CC" : 2.91, "NC" : 2.78, "NH" : 1.91, "HH" : 2.27}
 
@@ -156,6 +156,55 @@ def chop128(in_string):
     """
     
     return in_string
+    
+def write_cube_density(filename, positions, species, lattice, densities, timestep=0):
+    """ succeeded = write_cube_density(filename, positions, species, lattice, density, timestep=0)
+    
+    Writes a CUBE file containing the passed information. Note that we
+    can't deal with non-crystals so the lattice variable must be passed.
+    
+    The CUBE file format requires 3D volumetric data, in this case the density.
+    
+    Since we can't animate, we have to specify a timestep to use. By default this is the
+    first timestep.
+    
+    """
+    
+    pos = positions[timestep]
+    den = densities[timestep]
+    spec = species[timestep]
+    lat = lattice[timestep]
+    
+    f = open(filename, 'w')
+    # First two lines of a CUBE file are comments.
+    f.write("CUBE\n")
+    f.write("Output created by esc_lib.\n")
+    # Number of atoms then the origin of the density coordinate system.
+    f.write("%d 0.000000 0.000000 0.000000\n" % len(spec))
+    # Each of the next three lines specifies the number of grid points in an vector
+    # direction, then gives the step vector itself.
+    nx = den.shape[0]
+    ny = den.shape[1]
+    nz = den.shape[2]
+    f.write("%d %f %f %f\n" % (nx, lat[0][0] / nx, lat[0][1] / nx, lat[0][2] / nx))
+    f.write("%d %f %f %f\n" % (ny, lat[1][0] / ny, lat[1][1] / ny, lat[1][2] / ny))
+    f.write("%d %f %f %f\n" % (nz, lat[2][0] / nz, lat[2][1] / nz, lat[2][2] / nz))
+    # Now list atomic number, charge, position (absolute) for each atom. We don't
+    # actually deal with charge here, so set to 0.
+    for p, s in zip(pos, spec):
+        f.write("%d 0.000000 %f %f %f\n" % (s, p[0], p[1], p[2]))
+    
+    for i in range(nx):
+        for j in range(ny):
+            for k in range(nz):
+                f.write("%f " % den[i,j,k])
+                # Throw in a newline every now and then to keep the output readable.
+                if k % 6 is 5:
+                    f.write("\n")
+            f.write("\n")
+    
+    f.close()
+    return True
     
 def write_xsf(filename, positions, species, lattice=None):
     """ succeeded = write_xsf(filename, positions, species, lattice=None)
@@ -340,7 +389,9 @@ class Atoms:
     positions = []              # List of lists of atomic positions.
     forces = []                 # Same for forces...
     species = []                # and species.
-                                            
+    
+    densities = []              # List of 3D arrays.
+    
     def __init__(self, abinit_input):
         """ atoms = Atoms(xsf_file)
         
