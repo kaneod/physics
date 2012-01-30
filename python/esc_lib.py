@@ -4,7 +4,7 @@
 # (bohr, hartree, etc) and provide converter routines
 # to deal with other common units such as ang and eV.
 from __future__ import division
-from numpy import array, zeros, sqrt, reshape
+from numpy import array, zeros, sqrt, reshape, mat
 from numpy.linalg import norm
 
 # Element dictionaries
@@ -135,6 +135,7 @@ def abinit_value(data, keyword, nvalues):
     
     """
     
+    print "Reading in variable %s, looking for %d values." % (keyword, nvalues)
     values = []
     # The action starts at the index of the keyword.
     try:
@@ -153,18 +154,20 @@ def abinit_value(data, keyword, nvalues):
         except ValueError:
             # Need to parse this one.
             result = abinit_parse(d)
-            if result[0] is "single":
+            if result[0] == "single":
                 values.append(result[1])
-            elif result[0] is "multiple":
+            elif result[0] == "multiple":
                 values = values + result[1]
-            elif result[0] is "fill":
+            elif result[0] == "fill":
                 remaining = nvalues - len(values)
                 values = values + remaining * [result[1]]
                 return values
-        if len(values) is nvalues:
+        # Note "is" does NOT work here - need ==. Why?
+        if len(values) == nvalues:
             return values
             
     # If we get to here, we must not have enough values. Better raise an error.
+    
 
 def abinit_unit(data, keyword):
     """ unit = abinit_unit(data, keyword)
@@ -185,23 +188,25 @@ def abinit_unit(data, keyword):
     try:
         start = data.index(keyword)
     except ValueError:
-        raise ESCError("abinit_value", "The keyword %s was not found in the given abinit data" % keyword)
+        print "abinit_unit WARNING: keyword %s is not in the specified data stream." % keyword
         return None
     
     for i, d in enumerate(data[start+1:]):
+        print "Checking to see if %s is a unit..." % d
         result = abinit_parse(d)
-        if result[0] is "non-value":
-            if result[1] is ("angstrom" or "angstr"):
+        if result[0] == "non-value":
+            print "%s might be a unit!" % d
+            if result[1] in ["angstrom", "angstr"]:
                 return "ang"
-            elif result[1] is "ev":
+            elif result[1] == "ev":
                 return "eV"
-            elif result[1] is "bohr":
+            elif result[1] == "bohr":
                 return "bohr"
-            elif result[1] is ("ha" or "hartree"):
+            elif result[1] in ["ha", "hartree"]:
                 return "hartree"
-            elif result[1] is "k":
+            elif result[1] == "k":
                 return "K"
-            elif result[1] is "ry":
+            elif result[1] == "ry":
                 return "Ry"
             else:
                 return None
@@ -219,7 +224,7 @@ def abinit_int(data, keyword, nvalues):
     
     vals = abinit_value(data, keyword, nvalues)
     
-    if len(vals) is 1:
+    if len(vals) == 1:
         return int(vals[0])
     else:
         return [int(x) for x in vals]
@@ -234,10 +239,17 @@ def abinit_array(data, keyword, nvalues, newshape=None):
     (rows x columns) where n = nvalues / 3
     """
     
-    vals = array(abinit_value(data, keyword, nvalues))
+    vals = abinit_value(data, keyword, nvalues)
+    
+    # SNEAKY! array(None) is NOT NONE, so have to test
+    # prior to conversion. Bloody Numpy!
+    if vals is None:
+        return None
+    else:
+        vals = array(vals)
     
     if newshape is None:
-        return reshape(vals, (3,))
+        return reshape(vals, (-1, 3))
     else:
         return reshape(vals, newshape)
                 
@@ -298,7 +310,7 @@ def write_cube_density(filename, positions, species, lattice, densities, timeste
             for k in range(nz):
                 f.write("%f " % den[i,j,k])
                 # Throw in a newline every now and then to keep the output readable.
-                if k % 6 is 5:
+                if k % 6 == 5:
                     f.write("\n")
             f.write("\n")
     
@@ -330,7 +342,7 @@ def write_xsf(filename, positions, species, lattice=None):
     if alat is not None:
         f.write("CRYSTAL\n")
     
-    if alat is not None and len(alat) is 1:
+    if alat is not None and len(alat) == 1:
         f.write("PRIMVEC\n")
         f.write("    %g    %g    %g\n" % (alat[0][0][0], alat[0][0][1], alat[0][0][2]))
         f.write("    %g    %g    %g\n" % (alat[0][1][0], alat[0][1][1], alat[0][1][2]))
@@ -381,11 +393,11 @@ def write_abinit(filename, positions, species=None, xtype="bohr"):
         for s in species:
             typat.append(str(spec_dict[s]))
         f.write("typat       %s\n" % " ".join(typat))
-    if xtype is "bohr":
+    if xtype == "bohr":
         f.write("xcart\n")
         for p in positions:
             f.write("    %010e %010e %010e\n" % (p[0], p[1], p[2]))
-    if xtype is "ang":
+    if xtype == "ang":
         f.write("xangst\n")
         for p in bohr2ang(positions):
             f.write("    %010e %010e %010e\n" % (p[0], p[1], p[2]))
@@ -403,7 +415,7 @@ def bohr2ang(bohr):
     
     """
     
-    if type(bohr) is type([]):
+    if type(bohr) == type([]):
         # Call on each element and return
         return [bohr2ang(x) for x in bohr]
     else:
@@ -416,7 +428,7 @@ def ang2bohr(ang):
     
     """
     
-    if type(ang) is type([]):
+    if type(ang) == type([]):
         return [ang2bohr(x) for x in ang]
     else:
         return ang / 0.52917721092
@@ -428,7 +440,7 @@ def eV2hartree(eV):
     
     """
     
-    if type(eV) is type([]):
+    if type(eV) == type([]):
         return [eV2hartree(x) for x in eV]
     else:
         return eV / 27.21138505
@@ -440,7 +452,7 @@ def hartree2eV(hartree):
     
     """
     
-    if type(hartree) is type([]):
+    if type(hartree) == type([]):
         return [hartree2eV(x) for x in hartree]
     else:
         return hartree * 27.21138505
@@ -490,6 +502,8 @@ class Atoms:
     species = []                # and species.
     densities = []              # List of 3D arrays
     
+    test = []                   # Test output
+    
     def __init__(self, filename, filetype="XSF"):
         """ atoms = Atoms(filename, filetype="XSF")
         
@@ -502,9 +516,9 @@ class Atoms:
         
         """
         
-        if filetype is "XSF":
+        if filetype == "XSF":
             self.loadFromXSF(filename)
-        elif filetype is "abinit":
+        elif filetype == "abinit":
             self.loadFromAbinit(filename)
         
         
@@ -539,19 +553,53 @@ class Atoms:
         n = abinit_int(data, "natom", 1)
         ntypat = abinit_int(data, "ntypat", 1)
         znucl = abinit_int(data, "znucl", ntypat)
+        # znucl has to be a list
+        if type(znucl) == type(1):
+            znucl = [znucl]
         typat = abinit_int(data, "typat", n)
         
         # Double brackets because species, positions, etc are all timestep-friendly.
         self.species = [[znucl[x-1] for x in typat]]
         
         acell = abinit_value(data, "acell", 3)
-        acell_unit = abinit_unit(data, "acell")
+        if acell is None:
+            acell = array([1.0, 1.0, 1.0])
+        else:
+            acell_unit = abinit_unit(data, "acell")
+            print acell_unit
+            if acell_unit == "ang":
+                acell = ang2bohr(acell)
+        scalecart = abinit_value(data, "scalecart", 3)
+        if scalecart is None:
+            scalecart = array([1.0, 1.0, 1.0])        
         rprim = abinit_array(data, "rprim", 9)
+        if rprim is None:
+            rprim = array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]).reshape((3,3))
         
-        print acell
-        print acell_unit
-        print rprim
+        lat = zeros((3,3))
+        for i in [0, 1, 2]:
+            lat[i,:] = rprim[i,:] * acell[i]
+            print rprim[i,:], acell[i], lat[i,:]
+        for i in [0, 1, 2]:
+            lat[:,i] = lat[:,i] * scalecart[i]
+               
+        self.lattice = [lat]
         
+        # Try to get positions in the order: xred, xcart, xangst
+        pos = abinit_array(data, "xred", n * 3)
+        if pos is None:
+            pos = abinit_array(data, "xcart", n * 3)
+            if pos is None:
+                pos = abinit_array(data, "xangst", n * 3)
+                if pos is None:
+                    raise ESCError("loadFromAbinit", "ERROR: Must have at least one of xred, xcart or xangst specified in the abinit input file.")
+                else:
+                    pos = ang2bohr(pos)
+        else:
+            # Use variable lat to convert xred to actual positions.
+            pos = array(mat(pos) * mat(lat))
+            
+        self.positions = [[array(x) for x in pos.tolist()]]
         
     def loadFromXSF(self, xsf_file):
         """ atoms = Atoms.loadFromXSF(xsf_file)
@@ -590,16 +638,16 @@ class Atoms:
         
         # Cycle through the keywords and deal with each block.
         for i, (s, kw) in enumerate(zip(blocks, keywords)):
-            if kw is "ANIMSTEPS":
+            if kw == "ANIMSTEPS":
                 self.nsteps = int(data[s].split()[1])
-            if kw is "CRYSTAL":
+            if kw == "CRYSTAL":
                 self.is_crystal = True
-            if kw is "PRIMVEC":
+            if kw == "PRIMVEC":
                 a = ang2bohr(array([float(x) for x in data[s+1].split()[0:3]]))
                 b = ang2bohr(array([float(x) for x in data[s+2].split()[0:3]])) 
                 c = ang2bohr(array([float(x) for x in data[s+3].split()[0:3]]))
                 self.lattice.append([a, b, c])
-            if kw is "PRIMCOORD":
+            if kw == "PRIMCOORD":
                 nat = int(data[s+1].split()[0])
                 positions = []
                 forces = []
@@ -615,7 +663,7 @@ class Atoms:
                 self.positions.append(positions)
                 self.forces.append(forces)
                 self.species.append(species)
-            if kw is "ATOMS":
+            if kw == "ATOMS":
                 # THIS SECTION IS BUGGY!
                 positions = []
                 forces = []
