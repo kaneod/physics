@@ -6,6 +6,7 @@
 from __future__ import division
 from numpy import array, zeros, sqrt, reshape, mat
 from numpy.linalg import norm
+from libabi2py import utilities as abu
 
 # Element dictionaries
 
@@ -520,7 +521,32 @@ class Atoms:
             self.loadFromXSF(filename)
         elif filetype == "abinit":
             self.loadFromAbinit(filename)
+        elif filetype == "abi_density"
+            self.loadFromAbinitDensity(filename)
+    
+    def loadFromAbinitDensity(dens_file):
+        """ atoms= Atoms.loadFromAbinitDensity(dens_file)
         
+        Internal, inits an Atoms object from a _DEN file written
+        by abinit.
+        
+        """
+        
+        self.is_crystal = True
+        self.lattice = []
+        self.positions = []
+        self.forces = []
+        self.species = []
+        self.densities = []
+        
+        # The libabi2py fortran library does the hard work
+        # here, we just need to run the density routine and
+        # read out the values into the appropriate python
+        # variables.
+        
+        abu.density(dens_file)
+        
+         
         
                                             
     def loadFromAbinit(self, abinit_input):

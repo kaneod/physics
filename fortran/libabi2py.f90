@@ -79,6 +79,8 @@ module utilities
                 & ecut, ecutdg, ecutsm, ecut_eff, qptn(1:3), rprimd(1:3, 1:3), &
                 & stmbias, tphysel, tsmear, usewvl
                 
+        ! SOMETHING IS WRONG IN THE ABOVE READ NEAR PERTCASE
+                
         allocate(istwfk(nkpt))
         allocate(nband(nkpt * nsppol))
         allocate(npwarr(nkpt))
@@ -140,7 +142,6 @@ module utilities
         allocate(rhor(cplex * ngfft(1) * ngfft(2) * ngfft(3)))
         do ispden=1, nspden
             read(funit) rhor(:)
-            print *, rhor(:)
         end do
     
     end subroutine
