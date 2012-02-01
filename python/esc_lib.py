@@ -6,7 +6,7 @@
 from __future__ import division
 from numpy import array, zeros, sqrt, reshape, mat
 from numpy.linalg import norm
-from libabi2py import utilities as abu
+from libabitools import io
 
 # Element dictionaries
 
@@ -521,7 +521,7 @@ class Atoms:
             self.loadFromXSF(filename)
         elif filetype == "abinit":
             self.loadFromAbinit(filename)
-        elif filetype == "abi_density"
+        elif filetype == "abi_density":
             self.loadFromAbinitDensity(filename)
     
     def loadFromAbinitDensity(dens_file):
@@ -544,10 +544,25 @@ class Atoms:
         # read out the values into the appropriate python
         # variables.
         
-        abu.density(dens_file)
+        io.density(dens_file)
         
-         
+        nx = io.ngfft[0]
+        ny = io.ngfft[1]
+        nz = io.ngfft[2]
         
+        dens = zeros((nx, ny, nz))
+        
+        for k in range(nz):
+          for j in range(ny):
+            for i in range(nx):
+              dens[i,j,k] = io.rhor[i + nx * j + nx * ny * k]
+        
+        dens2 = io.rhor.reshape((nx, ny, nz), order='F')
+        
+        self.lattice = [[array(x) for x in io.rprimd.tolist()]] 
+        self.positions = [[array(x) for x in io.xred.T.tolist()]]
+        self.species = [[int(io.znucltypat[x-1]) for x in io.typat]]
+        self.densities = [dens]
                                             
     def loadFromAbinit(self, abinit_input):
         """ atoms = Atoms.loadFromAbinit(abinit_input)

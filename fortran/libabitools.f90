@@ -15,20 +15,24 @@
 ! versions will almost certainly fail at some point, especially very early (2.2)
 ! files which will fail at the first line.
 !
+! 2. f2py currently fails to parse selected_real_kind, so for the moment we
+! set dp = 8 manually. This is fine for x86_64 and so on, probably not on Cray.
+!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 module io
 
   implicit none
   
-  integer, parameter :: dp = selected_real_kind(15)
+  !integer, parameter :: dp = selected_real_kind(15)
+  integer, parameter :: dp = 8 ! see note 2
     
   !private ! Would like private but f2py can't handle it yet.
   
   ! Header variables (see src/43_abitypes_defs/defs_abitypes.F90)  
   integer :: bantot, date, headform, intxc, ixc, natom, nkpt, npsp, nspden
   integer :: nspinor, nsppol, nsym, ntypat, occopt, pertcase, usepaw, usewvl
-  integer :: fform
+  integer :: fform, cplex
   
   character(len=6) :: codvsn
     
@@ -51,7 +55,11 @@ module io
   
   real(kind=dp), allocatable, dimension(:,:) :: kptns, tnons, xred
   
-  character(len=132), allocatable, dimension(:) :: title  
+  character(len=132), allocatable, dimension(:) :: title
+  
+  ! Density
+  real(kind=dp), allocatable, dimension(:) :: rhor
+    
     
   contains
   
@@ -65,6 +73,7 @@ module io
     !
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     
+    ! Header
     if (allocated(istwfk)) deallocate(istwfk)
     if (allocated(lmn_size)) deallocate(lmn_size)
     if (allocated(nband)) deallocate(nband)
@@ -86,6 +95,9 @@ module io
     if (allocated(tnons)) deallocate(tnons)
     if (allocated(xred)) deallocate(xred)
     if (allocated(title)) deallocate(title)
+    
+    ! Density
+    if (allocated(rhor)) deallocate(rhor)
     
   end subroutine
     
@@ -114,7 +126,9 @@ module io
         
     ! Local variables
         
-    integer :: iatom, ii, ikpt, ipsp, isym
+    integer :: ipsp, bsize, lnspden
+    integer, allocatable, dimension(:) :: ibuffer, nsel
+    real(kind=dp), allocatable, dimension(:) :: buffer
         
     ! First line of the file is the code version, header format and file format.
     
@@ -126,8 +140,6 @@ module io
     &           nspinor, nsppol, nsym, npsp, ntypat, occopt, pertcase, usepaw, &
     &           ecut, ecutdg, ecutsm, ecut_eff, qptn(:), rprimd(:,:), stmbias, &
     &           tphysel, tsmear, usewvl
-    
-    print *, ecut, ecutdg, ecutsm, ecut_eff
     
     ! We can now allocate our variables
     
@@ -170,6 +182,55 @@ module io
     
     read(funit) residm, xred(:,:), etot, fermie
     
+    ! Set cplex in case we need it later and aren't using PAW.
+    cplex = 1
+    
+    ! PAW parts of the header. We do not save this - just read to put the file
+    ! pointer past the header.
+    
+    if (usepaw==1) then
+      allocate(nsel(natom))
+      read(funit) nsel(:), cplex, lnspden
+      bsize = sum(nsel)
+      allocate(ibuffer(bsize))
+      allocate(buffer(bsize * nspden * cplex))
+      read(funit) ibuffer(:), buffer(:)
+      deallocate(ibuffer, buffer, nsel)
+    end if
+    
+  end subroutine
+  
+  subroutine read_density(funit)
+  
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !
+    ! read_density(funit)
+    !
+    ! Internal: reads density rhor from an already-opened DEN file.
+    !
+    ! Input variables:
+    !
+    ! funit: file unit number for the DEN file.
+    !
+    ! Notes:
+    !
+    ! 1. rhor is a single-dimensional. To recast into a three-dimensional array,
+    ! take the fast access to be the first primitive vector.
+    !
+    ! 2. We don't actually handle complex densities anywhere else at the moment
+    ! even though we account for the possibilty of them here.
+    !
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    
+    integer, intent(in) :: funit
+    integer :: ispden
+    
+    allocate(rhor(cplex * ngfft(1) * ngfft(2) * ngfft(3)))
+    
+    do ispden=1,nspden
+      read(funit) rhor(:)
+    end do
+  
   end subroutine
   
   subroutine header(filename)
@@ -194,6 +255,30 @@ module io
     call deallocate_all    
     open(unit=100, file=filename, status='old', form='unformatted')       
     call read_header(100)        
+    close(100)
+    
+  end subroutine
+  
+  subroutine density(filename)
+  
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !
+    ! density(filename)
+    !
+    ! For external access: opens, reads, and closes, an abinit _DEN file.
+    !
+    ! Input variables:
+    !
+    ! filename: Path to the file you want to open.
+    !
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    
+    character(len=132), intent(in) :: filename
+    
+    call deallocate_all
+    open(unit=100, file=filename, status='old', form='unformatted')
+    call read_header(100)
+    call read_density(100)
     close(100)
     
   end subroutine
