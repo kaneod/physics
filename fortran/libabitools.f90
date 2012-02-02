@@ -57,7 +57,7 @@ module io
   
   character(len=132), allocatable, dimension(:) :: title
   
-  ! Density
+  ! Density variables
   real(kind=dp), allocatable, dimension(:) :: rhor
     
     

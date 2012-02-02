@@ -368,45 +368,118 @@ def write_xsf(filename, positions, species, lattice=None):
     f.close()
     return True
 
-def write_abinit(filename, positions, species=None, xtype="bohr"):
-    """ succeeded = write_abinit(filename, positions, species=None, xtype="ang")
+def write_abinit(filename, positions, species=None, xtype="bohr", timestep=0):
+    """ succeeded = write_abinit(filename, positions, species=None, xtype="ang", timestep=0)
     
     Writes the passed positions in a format suitable to be copy and pasted
     into an abinit input file. If species are passed, the natom, ntypat,
     typat and znucl parts are also output. Options for xtype are "ang", for
     xangst output (Default) or "bohr" for xcart output.
     
+    One needs to specify a timestep since the positions variable can be animated
+    as can the species variable - the default is zero.
+    
     Note: NEED TO ADD xred OUTPUT!
     
     """
     
+    pos = positions[timestep]
+    
     f = open(filename, 'w')
     
     if species is not None:
-        f.write("natom       %d\n" % len(species))
-        f.write("ntypat      %d\n" % len(uniqify(species)))
-        f.write("znucl       %s\n" % " ".join([str(x) for x in uniqify(species)]))
+        spec = species[timestep]
+        f.write("natom       %d\n" % len(spec))
+        f.write("ntypat      %d\n" % len(uniqify(spec)))
+        f.write("znucl       %s\n" % " ".join([str(x) for x in uniqify(spec)]))
         # Generate typat string
         spec_dict = {}
         typat = []
-        for i,s in enumerate(uniqify(species)):
+        for i,s in enumerate(uniqify(spec)):
             spec_dict[s] = i+1
-        for s in species:
+        for s in spec:
             typat.append(str(spec_dict[s]))
         f.write("typat       %s\n" % " ".join(typat))
     if xtype == "bohr":
         f.write("xcart\n")
-        for p in positions:
+        for p in pos:
             f.write("    %010e %010e %010e\n" % (p[0], p[1], p[2]))
     if xtype == "ang":
         f.write("xangst\n")
-        for p in bohr2ang(positions):
+        for p in bohr2ang(pos):
             f.write("    %010e %010e %010e\n" % (p[0], p[1], p[2]))
     
     f.close()
     return True        
         
-        
+def write_elk(filename, positions, species, is_crystal=False, lattice=None, timestep=0):
+    """ succeeded = write_elk(filename, positions, species, is_crystal=False, lattice= None, timestep=0)
+    
+    Writes the passed positions and species in a format suitable to be copy and
+    pasted into an elk input file. Since elk requires atomic units, we do not
+    have a unit conversion option here. If is_crystal is True, the coordinates
+    are written as reduced with respect to the specified lattice.
+    
+    As usual we can accommodate animated data with a timestep parameter, the
+    default is zero (first timestep).
+    
+    """
+    
+    pos = positions[timestep]
+    spec = species[timestep]
+    
+    f = open(filename, 'w')
+    
+    if not is_crystal:
+      f.write("molecule\n")
+      f.write("  .true.\n\n")
+    else:
+      if lattice is None:
+        raise ESCError("write_elk", "ERROR: If is_crystal is False, you must specify a lattice")
+      else:
+        lat = lattice[timestep]
+        pos = card2reduced(pos, lat)
+      
+    f.write("atoms\n")
+    f.write("  %d\n" % len(uniqify(spec)))          # Total number of atoms
+    for s in uniqify(spec):
+      f.write('  "REPLACE.in"\n')             # Replace in the output file
+                                              # with the species filename
+      f.write("  %d\n" % spec.count(s))    # Number of atoms of species s 
+      
+      for i,p in enumerate(pos):
+        if spec[i] == s:
+          f.write("  %f %f %f 0.000000 0.000000 0.000000\n" % (p[0], p[1], p[2]))
+      
+    f.write("\n")    
+    f.close()
+    
+def cart2reduced(position, lattice):
+    """ reduced = cart2reduced(position, lattice)
+    
+    Converts a cartesian coordinate to a reduced coordinate with respect to
+    the lattice. Works recursively on lists.
+    
+    """
+    
+    if type(position) == type([]):
+      return [cart2reduced(x, lattice) for x in position]
+    else:
+      return array(mat(position) * mat(lattice).I).reshape((3,))
+      
+def reduced2cart(position, lattice):
+    """ cart = reduced2cart(position, lattice)
+    
+    Converts a reduced coordinate to a cartesian coordinate with respect to the
+    supplied lattice. Works recursively on lists.
+    
+    """
+    
+    if type(position) == type([]):
+      return [reduced2cart(x, lattice) for x in position]
+    else:
+      return array(mat(position) * mat(lattice)).reshape((3,))
+            
 def bohr2ang(bohr):
     """ ang = bohr2ang(bohr)
     
@@ -524,7 +597,7 @@ class Atoms:
         elif filetype == "abi_density":
             self.loadFromAbinitDensity(filename)
     
-    def loadFromAbinitDensity(dens_file):
+    def loadFromAbinitDensity(self, dens_file):
         """ atoms= Atoms.loadFromAbinitDensity(dens_file)
         
         Internal, inits an Atoms object from a _DEN file written
@@ -560,9 +633,9 @@ class Atoms:
         dens2 = io.rhor.reshape((nx, ny, nz), order='F')
         
         self.lattice = [[array(x) for x in io.rprimd.tolist()]] 
-        self.positions = [[array(x) for x in io.xred.T.tolist()]]
+        self.positions = [reduced2cart([array(x) for x in io.xred.T.tolist()], self.lattice[0])]
         self.species = [[int(io.znucltypat[x-1]) for x in io.typat]]
-        self.densities = [dens]
+        self.densities = [dens2]
                                             
     def loadFromAbinit(self, abinit_input):
         """ atoms = Atoms.loadFromAbinit(abinit_input)
