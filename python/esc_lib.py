@@ -225,7 +225,9 @@ def abinit_int(data, keyword, nvalues):
     
     vals = abinit_value(data, keyword, nvalues)
     
-    if len(vals) == 1:
+    if vals is None:
+      return None
+    elif len(vals) == 1:
         return int(vals[0])
     else:
         return [int(x) for x in vals]
@@ -253,7 +255,66 @@ def abinit_array(data, keyword, nvalues, newshape=None):
         return reshape(vals, (-1, 3))
     else:
         return reshape(vals, newshape)
-                
+
+def elk_value(data, keyword, nvalues):
+    """ values = elk_values(data, keyword, nvalues)
+    
+    Returns nvalues values from an elk input datastream corresponding to
+    the given keyword. Items are returned as strings - use wrapper functions to
+    get floats and ints.
+    
+    """
+    
+    if keyword in data:
+      start = data.index(keyword)+1
+      try:
+        return [float(x) for x in data[start:start+nvalues]]
+      except ValueError:
+        # value is not convertible to a float: must be a string instead.
+        return data[start:start+nvalues]
+    else:
+      print "elk_value WARNING: keyword %s does not exist in this file." % keyword
+      return None
+      
+def elk_array(data, keyword, nvalues, newshape=None):
+    """ a = elk_array(data, keyword, nvalues, newshape=None)
+    
+    Convenience function wrapping elk_value but returning floats. Returns a 
+    single value if nvalues is 1.
+    
+    """
+    
+    vals = elk_value(data, keyword, nvalues)
+    
+    if vals is None:
+      return None
+    elif len(vals) == 1:
+      return float(vals[0])
+    else:
+      vals = array(vals)
+      
+    if newshape is None:
+      return vals
+    else:
+      return vals.reshape(newshape)
+      
+def elk_int(data, keyword, nvalues):
+    """ i = elk_int(data, keyword, nvalues)
+    
+    Convenience function returning integers. Will return a single int if nvalues
+    is one, otherwise returns a *list* of ints (not array type).
+    
+    """
+    
+    vals = elk_value(data, keyword, nvalues)
+    
+    if vals is None:
+      return None
+    elif len(vals) == 1:
+      return int(vals[0])
+    else:
+      return [int(x) for x in vals]
+    
             
 def chop128(in_string):
     """ out_string = chop128(in_string)
@@ -298,18 +359,18 @@ def write_cube_density(filename, positions, species, lattice, densities, timeste
     nx = den.shape[0]
     ny = den.shape[1]
     nz = den.shape[2]
-    f.write("%d %f %f %f\n" % (nx, lat[0][0] / nx, lat[0][1] / nx, lat[0][2] / nx))
-    f.write("%d %f %f %f\n" % (ny, lat[1][0] / ny, lat[1][1] / ny, lat[1][2] / ny))
-    f.write("%d %f %f %f\n" % (nz, lat[2][0] / nz, lat[2][1] / nz, lat[2][2] / nz))
+    f.write("%d %g %g %g\n" % (nx, lat[0][0] / nx, lat[0][1] / nx, lat[0][2] / nx))
+    f.write("%d %g %g %g\n" % (ny, lat[1][0] / ny, lat[1][1] / ny, lat[1][2] / ny))
+    f.write("%d %g %g %g\n" % (nz, lat[2][0] / nz, lat[2][1] / nz, lat[2][2] / nz))
     # Now list atomic number, charge, position (absolute) for each atom. We don't
     # actually deal with charge here, so set to 0.
     for p, s in zip(pos, spec):
-        f.write("%d 0.000000 %f %f %f\n" % (s, p[0], p[1], p[2]))
+        f.write("%d 0.000000 %g %g %g\n" % (s, p[0], p[1], p[2]))
     
     for i in range(nx):
         for j in range(ny):
             for k in range(nz):
-                f.write("%f " % den[i,j,k])
+                f.write("%g " % den[i,j,k])
                 # Throw in a newline every now and then to keep the output readable.
                 if k % 6 == 5:
                     f.write("\n")
@@ -423,6 +484,8 @@ def write_elk(filename, positions, species, is_crystal=False, lattice=None, time
     As usual we can accommodate animated data with a timestep parameter, the
     default is zero (first timestep).
     
+    Note: MOLECULAR INPUT TO ELK IS NOT WORKING IN 1.4.5
+    
     """
     
     pos = positions[timestep]
@@ -438,21 +501,27 @@ def write_elk(filename, positions, species, is_crystal=False, lattice=None, time
         raise ESCError("write_elk", "ERROR: If is_crystal is False, you must specify a lattice")
       else:
         lat = lattice[timestep]
-        pos = card2reduced(pos, lat)
-      
+        pos = cart2reduced(pos, lat)
+        f.write("avec\n")
+        f.write("  %g %g %g\n" % (lat[0][0], lat[0][1], lat[0][2]))
+        f.write("  %g %g %g\n" % (lat[1][0], lat[1][1], lat[1][2]))
+        f.write("  %g %g %g\n" % (lat[2][0], lat[2][1], lat[2][2]))
+        f.write("\n")
+    
     f.write("atoms\n")
     f.write("  %d\n" % len(uniqify(spec)))          # Total number of atoms
     for s in uniqify(spec):
-      f.write('  "REPLACE.in"\n')             # Replace in the output file
+      f.write("  'REPLACE.in'\n")             # Replace in the output file
                                               # with the species filename
       f.write("  %d\n" % spec.count(s))    # Number of atoms of species s 
       
       for i,p in enumerate(pos):
         if spec[i] == s:
-          f.write("  %f %f %f 0.000000 0.000000 0.000000\n" % (p[0], p[1], p[2]))
+          f.write("  %g %g %g 0.000000 0.000000 0.000000\n" % (p[0], p[1], p[2]))
       
     f.write("\n")    
     f.close()
+    return True
     
 def cart2reduced(position, lattice):
     """ reduced = cart2reduced(position, lattice)
@@ -596,6 +665,87 @@ class Atoms:
             self.loadFromAbinit(filename)
         elif filetype == "abi_density":
             self.loadFromAbinitDensity(filename)
+        elif filetype == "elk":
+            self.loadFromElk(filename)
+            
+    def loadFromElk(self, filename):
+        """ atoms= Atoms.loadFromElk(filename)
+        
+        Internal, inits an Atoms object from an elk input file.
+        
+        """
+        
+        self.is_crystal = True
+        self.lattice = []
+        self.positions = []
+        self.forces = []
+        self.species = []
+        self.densities = []
+        
+        f = open(filename, 'r')
+        
+        # Construct our datastream
+        
+        lines = f.readlines()
+        f.close()
+        
+        data = remove_comments(lines, "#")
+        data = remove_comments(lines, "!")
+        data = remove_comments(lines, ":")
+        data = " ".join(data).split()
+        
+        # Read scales and primitive vectors
+        s = elk_array(data, "scale", 1)
+        if s is None:
+          s = 1.0
+        s1 = elk_array(data, "scale1", 1)
+        if s1 is None:
+          s1 = 1.0
+        s2 = elk_array(data, "scale2", 1)
+        if s2 is None:
+          s2 = 1.0
+        s3 = elk_array(data, "scale3", 1)
+        if s3 is None:
+          s3 = 1.0
+        avec = elk_array(data, "avec", 9, newshape=(3,3))
+        if avec is None:
+          avec = array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]).reshape((3,3))
+        avec = s * avec
+        avec[0,:] = s1 * avec[0,:]
+        avec[1,:] = s2 * avec[1,:]
+        avec[2,:] = s3 * avec[2,:]
+        self.lattice = [[array(x) for x in avec.tolist()]]
+        
+        # Parse the atoms block
+        start = data.index("atoms")
+        nspecies = int(data[start+1])
+        curpos = start+2
+        spec = []
+        pos = []
+        for i in range(nspecies):
+          spfname = data[curpos].strip("'").strip('"').split(".")[0]
+          ncurspec = int(data[curpos+1])
+          spec = spec + ncurspec * [getElementZ(spfname)]
+          for j in range(ncurspec):
+            pstart = curpos+2 + j*6
+            pos.append(array([float(x) for x in data[pstart:pstart+3]]))
+          curpos = pstart + 6
+        self.species.append(spec)
+        
+        # Need to check if the molecule flag is set: if not, convert
+        # from reduced to cart coords.
+        if "molecule" in data:
+          if data[data.index("molecule") + 1].lower() == ".true.":
+            self.is_crystal = False
+          else:
+            self.is_crystal = True
+        else:
+          self.is_crystal = True
+        
+        if self.is_crystal:
+          pos = reduced2cart(pos, avec)
+         
+        self.positions.append(pos)
     
     def loadFromAbinitDensity(self, dens_file):
         """ atoms= Atoms.loadFromAbinitDensity(dens_file)
