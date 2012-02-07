@@ -379,11 +379,14 @@ def write_cube_density(filename, positions, species, lattice, densities, timeste
     f.close()
     return True
     
-def write_xsf(filename, positions, species, lattice=None):
-    """ succeeded = write_xsf(filename, positions, species, lattice=None)
+def write_xsf(filename, positions, species, lattice=None, letter_spec=True):
+    """ succeeded = write_xsf(filename, positions, species, lattice=None, letter_spec=True)
     
     Writes a XSF file containing the passed information. Can be animated,
     in crystal or molecular format, fixed cell or variable cell.
+    
+    If letter_spec is True (default), writes the species identifier as a letter
+    rather than a nuclear Z value.
     
     NOTE: NEED TO ADD OPTIONAL FORCES!
     
@@ -424,6 +427,9 @@ def write_xsf(filename, positions, species, lattice=None):
             f.write("PRIMCOORD %d\n" % (i+1))
             f.write("%d 1\n" % len(apos[i]))
         for j in range(len(apos[i])):
+          if letter_spec:
+            f.write("%s    %g    %g    %g\n" % (elements[species[i][j]], apos[i][j][0], apos[i][j][1], apos[i][j][2]))
+          else:
             f.write("%d    %g    %g    %g\n" % (species[i][j], apos[i][j][0], apos[i][j][1], apos[i][j][2]))
         
     f.close()
