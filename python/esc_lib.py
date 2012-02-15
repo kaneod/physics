@@ -4,7 +4,7 @@
 # (bohr, hartree, etc) and provide converter routines
 # to deal with other common units such as ang and eV.
 from __future__ import division
-from numpy import array, zeros, sqrt, reshape, mat
+from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin
 from numpy.linalg import norm
 from libabitools import io
 
@@ -62,6 +62,95 @@ def getBondLengths(positions, species, cutoff=3.0, give_species=False):
         
         return bonds
 
+def rotate_positions(positions, filename, fileopt=0):
+  """ new_positions = rotate_positions(positions, filename, fileopt=0)
+    
+    Rotates specified coordinates around a specified axis and returns the new positions.
+    Can be used, for example, to rotate portions of a molecule. The rotations come
+    from a file in the form:
+    
+    i1 i2 i3 theta
+    ...
+    ...
+    
+    (if fileopt = 0) where i1 is the atomic index to be rotated and the axis is 
+    formed as the vector between atoms i2 and i3. Rotation is ANTICLOCKWISE 
+    viewed along the axis.
+    
+    If fileopt is 1, the format is i1, x1, x2, x3, theta, where xi give the actual
+    axis. This will be normalized before use so units don't matter.
+    
+    Comments marked with # or ! are ignored in the rotation file.
+    
+    NOTE: the indices i1, i2, etc are 1-based, to align with XCrysden, not
+    0-based. We convert inside this routine.
+    
+  """
+  
+  new_positions = positions
+  
+  f = open(filename)
+  lines = f.readlines()
+  lines = remove_comments(lines, "#")
+  lines = remove_comments(lines, "!")
+  
+  indices = []
+  axes = []
+  angles = []
+  
+  for line in lines:
+    bits = line.split()
+    indices.append(int(bits[0]) - 1) # remember to subtract 1 from the indices
+                                     # since python is 0-based!
+    if fileopt == 0:
+      a = int(bits[1]) - 1
+      b = int(bits[2]) - 1
+      axes.append(positions[b] - positions[a])
+      angles.append(float(bits[3]))
+    elif fileopt == 1:
+      axes.append(array([float(x) for x in bits[1:4]]))
+      angles.append(float(bits[4]))
+    else:
+      print "rotate_positions: ERROR - fileopt must be 0 or 1, not %d" % fileopt
+  
+  for i,a,t in zip(indices, axes, angles):
+    new_positions[i] = rotate(positions[i], a, t)
+  
+  return new_positions
+  
+def rotate(vec, axis, angle):
+  """ new_vec = rotate(vec, axis, angle)
+    
+    Rotates a vector vec by the specified angle, ANTICLOCKWISE looking along
+    axis.
+    
+  """
+    
+  # Convert angle to radians
+  r = angle * pi / 180
+    
+  # Make sure axis is normalized
+  ux, uy, uz = axis/norm(axis)
+    
+  # Matrices
+  UU = matrix([[ux * ux, ux * uy, ux * uz],
+               [ux * uy, uy * uy, uz * uy],
+               [ux * uz, uy * uz, uz * uz]])
+  
+  UX = matrix([[0, -uz, uy],
+               [uz, 0, -ux],
+               [-uy, ux, 0]])
+               
+  I = matrix([[1.0, 0.0, 0.0],
+              [0.0, 1.0, 0.0],
+              [0.0, 0.0, 1.0]])
+              
+  R = cos(r) * I + sin(r) * UX + (1.0 - cos(r)) * UU
+  
+  # Apply matrix to column vector of c.
+  
+  return array(R * matrix(vec).T).flatten()
+ 
 def remove_comments(lines, comment_delim):
     """ stripped = remove_comments(lines, comment_delim)
     
