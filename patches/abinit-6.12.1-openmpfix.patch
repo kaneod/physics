@@ -1,0 +1,569 @@
+diff -rupN abinit-6.12.1-mod/m2-login1.ac abinit-6.12.1/m2-login1.ac
+--- abinit-6.12.1-mod/m2-login1.ac	2012-02-14 12:17:56.622675000 +1100
++++ abinit-6.12.1/m2-login1.ac	1970-01-01 10:00:00.000000000 +1000
+@@ -1,55 +0,0 @@
+-
+-enable_64bit_flags="yes"
+-enable_optim="yes"
+-prefix="${HOME}/local"
+-
+-CPP="$HOME/local/bin/cpp-4.6"
+-CC="mpicc"
+-CFLAGS_OPTIM="-O3 -march=native"
+-CXX="mpicxx"
+-CXXFLAGS_OPTIM="-O3 -march=native"
+-FC="mpif90"
+-F77="mpif77"
+-FCFLAGS_OPTIM="-O3 -march=native -mtune=native -funroll-loops -floop-block -flto -fopenmp"
+-FC_LDFLAGS="-static-libgfortran"
+-FC_LIBS_EXTRA="-lgomp"
+-
+-#enable_stdin="no"
+-#fcflags_opt_95_drive="-O0"
+-
+-enable_mpi="yes"
+-enable_mpi_io="yes"
+-with_mpi_level="1"
+-MPI_RUNNER="$HOME/local/bin/mpiexec"
+-
+-with_trio_flavor="none"
+-#with_etsf_io_incs="-I/opt/etsf/include"
+-#with_etsf_io_libs="-L/opt/etsf/lib -letsf_io"
+-#with_netcdf_incs="-I/usr/local/include/netcdf"
+-#with_netcdf_libs="-L/usr/local/lib/netcdf -lnetcdff -lnetcdf"
+-
+-with_fft_flavor="fftw3"
+-with_fft_incs="-I$HOME/local/include"
+-with_fft_libs="-L$HOME/local/lib -lfftw3"
+-
+-with_linalg_flavor="custom"
+-with_linalg_incs="-I$HOME/local/include"
+-with_linalg_libs="-L$HOME/local/lib -lopenblas"
+-
+-with_dft_flavor="atompaw+libxc"
+-
+-with_libxc_incs="-I$HOME/local/include"
+-with_libxc_libs="-L$HOME/local/lib -lxc"
+-
+-#enable_fallbacks="no"
+-
+-#enable_gw_cutoff="yes"
+-enable_gw_dpc="yes"
+-enable_gw_openmp="yes"
+-#enable_gw_optimal="yes"
+-#enable_gw_wrapper="yes"
+-enable_smp="yes"
+-
+-enable_fast_check="yes"
+-
+-
+diff -rupN abinit-6.12.1-mod/src/53_ffts/fourwf.F90 abinit-6.12.1/src/53_ffts/fourwf.F90
+--- abinit-6.12.1-mod/src/53_ffts/fourwf.F90	2012-02-14 12:38:17.294007000 +1100
++++ abinit-6.12.1/src/53_ffts/fourwf.F90	2012-01-31 07:43:51.000000000 +1100
+@@ -783,8 +783,8 @@ subroutine fourwf(cplex,denpot,fofgin,fo
+                      fofgout(2,ig+npwout*(idat-1))=work1(2,i1,i3,i2+n5*(idat-1))*xnorm
+                    end do
+                  end do
+-!$OMP END PARALLEL DO               
+                end if
++!$OMP END PARALLEL DO
+              end if ! fftalga
+            else if(inplace==1)then
+ !$OMP PARALLEL DO PRIVATE(i1,i2,i3,ig,idat) SHARED(fofgout,fofr,kg_kout,ndat,n1,n2,n3,npwout,xnorm)
+diff -rupN abinit-6.12.1-mod/src/56_mixing/dotprodm_vn.F90 abinit-6.12.1/src/56_mixing/dotprodm_vn.F90
+--- abinit-6.12.1-mod/src/56_mixing/dotprodm_vn.F90	2012-02-14 12:54:16.657933000 +1100
++++ abinit-6.12.1/src/56_mixing/dotprodm_vn.F90	2012-01-31 07:43:36.000000000 +1100
+@@ -269,8 +269,8 @@ subroutine dotprodm_vn(cplex,cpldot,dena
+            ar=zero ; ai=zero
+ !$OMP PARALLEL DO PRIVATE(ir) &
+ !$OMP&PRIVATE(jr) &
+-!$OMP&PRIVATE(dre11,dim11,dre22,dim22,dre12,dim12) &
+-!$OMP&PRIVATE(pre11,pim11,pim22,pre12,pim12) &
++!$OMP&PRIVATE(dre11,dim11,dre22,dim22,dre12,dim12,dre22,dim22) &
++!$OMP&PRIVATE(pre11,pim11,pre22,pim22,pre12,pim12,pre22,pim22) &
+ !$OMP&SHARED(id,i1,i2,ip,nfft,denarr,potarr) REDUCTION(+:ar)
+            do ir=1,nfft
+              jr=2*ir
+@@ -309,8 +309,8 @@ subroutine dotprodm_vn(cplex,cpldot,dena
+            ar=zero ; ai=zero
+ !$OMP PARALLEL DO PRIVATE(ir) &
+ !$OMP&PRIVATE(jr) &
+-!$OMP&PRIVATE(dre11,dim11,dre22,dim22,dre12,dim12) &
+-!$OMP&PRIVATE(pre11,pim11,pre22,pim22,pre12,pim12) &
++!$OMP&PRIVATE(dre11,dim11,dre22,dim22,dre12,dim12,dre22,dim22) &
++!$OMP&PRIVATE(pre11,pim11,pre22,pim22,pre12,pim12,pre22,pim22) &
+ !$OMP&SHARED(id,i1,i2,ip,nfft,denarr,potarr) REDUCTION(+:ar,ai)
+            do ir=1,nfft
+              jr=2*ir
+diff -rupN abinit-6.12.1-mod/src/56_xc/rhohxc.F90 abinit-6.12.1/src/56_xc/rhohxc.F90
+--- abinit-6.12.1-mod/src/56_xc/rhohxc.F90	2012-02-14 14:43:40.293344000 +1100
++++ abinit-6.12.1/src/56_xc/rhohxc.F90	2012-01-31 06:40:41.000000000 +1100
+@@ -696,7 +696,7 @@ subroutine rhohxc(dtset,enxc,gsqcut,izer
+ !$OMP&PRIVATE(s1,s2,s3,vxcrho_b_updn) &
+ !$OMP&REDUCTION(+:epsxc,enxc,strsxc1_tot,strsxc2_tot,strsxc3_tot) &
+ !$OMP&REDUCTION(+:strsxc4_tot,strsxc5_tot,strsxc6_tot) &
+-!$OMP&SHARED(depsxc,kxc,mpts,nfft,ngrad,nspden_updn,order) &
++!$OMP&SHARED(depsxc,dtset%ixc,kxc,mpts,nfft,ngrad,nspden_updn,order) &
+ !$OMP&SHARED(rhonow,vxc)
+      do ifft=1,nfft,mpts
+ !      npts=mpts
+diff -rupN abinit-6.12.1-mod/src/56_xc/xcden.F90 abinit-6.12.1/src/56_xc/xcden.F90
+--- abinit-6.12.1-mod/src/56_xc/xcden.F90	2012-02-14 14:54:09.441887000 +1100
++++ abinit-6.12.1/src/56_xc/xcden.F90	2012-01-31 07:43:51.000000000 +1100
+@@ -272,9 +272,9 @@ lrhonow)              !Optional argument
+          end do
+          if(mod(n3,2)==0 .and. qeq0==1)gcart3(n3/2+1)=zero
+ 
+-         ifft = 0
+ !$OMP PARALLEL DO PRIVATE(ifft,i1,i2,i3,gcart_idir,gc23_idir) &
+ !$OMP&SHARED(gcart1,gcart2,gcart3,n1,n2,n3,wkcmpx,workgr)
++         ifft = 0
+          do i3=1,n3
+            do i2=1,n2
+              gc23_idir=gcart2(i2)+gcart3(i3)
+diff -rupN abinit-6.12.1-mod/src/56_xc/xcpot.F90 abinit-6.12.1/src/56_xc/xcpot.F90
+--- abinit-6.12.1-mod/src/56_xc/xcpot.F90	2012-02-14 14:53:26.026482000 +1100
++++ abinit-6.12.1/src/56_xc/xcpot.F90	2012-01-31 07:43:43.000000000 +1100
+@@ -295,10 +295,10 @@ subroutine xcpot (cplex,depsxc,gprimd,is
+            gcart3(i3)=gprimd(idir,3)*two_pi*(dble(ig3)+qphon(3))
+          end do
+          if(mod(n3,2)==0 .and. qeq0==1)gcart3(n3/2+1)=zero
+-         
+-         ifft = 0
++
+ !$OMP PARALLEL DO PRIVATE(ifft,i1,i2,i3,gc23_idir,gcart_idir) &
+ !$OMP&SHARED(gcart1,gcart2,gcart3,n1,n2,n3,wkcmpx,workgr)
++         ifft = 0
+          do i3=1,n3
+            do i2=1,n2
+              gc23_idir=gcart2(i2)+gcart3(i3)
+diff -rupN abinit-6.12.1-mod/src/65_nonlocal/mkffnl.F90 abinit-6.12.1/src/65_nonlocal/mkffnl.F90
+--- abinit-6.12.1-mod/src/65_nonlocal/mkffnl.F90	2012-02-14 15:11:10.954152000 +1100
++++ abinit-6.12.1/src/65_nonlocal/mkffnl.F90	2012-01-31 07:43:53.000000000 +1100
+@@ -247,7 +247,7 @@ subroutine mkffnl(dimekb,dimffnl,ekb,ffn
+    if (ider>=1) ABI_ALLOCATE(kpgn,(npw,3))
+    if (nkpg<3) then
+ !$OMP PARALLEL DO PRIVATE(ig) &
+-!$OMP&SHARED(kpt,kg,kpgc,kpgnorm,kpgnorm_inv,gprimd,npw)
++!$OMP&SHARED(kpt,kg,kpgc,kpgnorm,kpgnorm_inv,gprimd,npw,tol10)
+      do ig=1,npw
+        kpg1=kpt(1)+dble(kg(1,ig));kpg2=kpt(2)+dble(kg(2,ig));kpg3=kpt(3)+dble(kg(3,ig))
+        kpgc1=kpg1*gprimd(1,1)+kpg2*gprimd(1,2)+kpg3*gprimd(1,3)
+@@ -265,7 +265,7 @@ subroutine mkffnl(dimekb,dimffnl,ekb,ffn
+ !$OMP END PARALLEL DO
+    else
+ !$OMP PARALLEL DO PRIVATE(ig) &
+-!$OMP&SHARED(kpgc,kpgnorm,kpgnorm_inv,gprimd,npw)
++!$OMP&SHARED(kpgc,kpgnorm,kpgnorm_inv,gprimd,npw,tol10)
+      do ig=1,npw
+        kpgc1=kpg(ig,1)*gprimd(1,1)+kpg(ig,2)*gprimd(1,2)+kpg(ig,3)*gprimd(1,3)
+        kpgc2=kpg(ig,1)*gprimd(2,1)+kpg(ig,2)*gprimd(2,2)+kpg(ig,3)*gprimd(2,3)
+@@ -285,7 +285,7 @@ subroutine mkffnl(dimekb,dimffnl,ekb,ffn
+ !    Note that with ecutsm=0, the right kinetic energy is computed
+      call mkkin(ecut,ecutsm,effmass,gmet,kg,kpgnorm,kpt,npw)
+ !$OMP PARALLEL DO PRIVATE(ig) &
+-!$OMP&SHARED(npw,kpgnorm,kpgnorm_inv)
++!$OMP&SHARED(renorm_factor,npw,kpgnorm,kpgnorm_inv,tol10)
+      do ig=1,npw
+        kpgnorm(ig)=sqrt(renorm_factor*kpgnorm(ig))
+        kpgnorm_inv(ig)=1.d0/max(kpgnorm(ig),tol10)
+@@ -293,7 +293,7 @@ subroutine mkffnl(dimekb,dimffnl,ekb,ffn
+ !$OMP END PARALLEL DO
+    else
+ !$OMP PARALLEL DO PRIVATE(ig) &
+-!$OMP&SHARED(kpg,kpgnorm,kpgnorm_inv,gprimd,npw)
++!$OMP&SHARED(kpg,kpgnorm,kpgnorm_inv,gprimd,npw,tol10)
+      do ig=1,npw
+        kpgc1=kpg(ig,1)*gprimd(1,1)+kpg(ig,2)*gprimd(1,2)+kpg(ig,3)*gprimd(1,3)
+        kpgc2=kpg(ig,1)*gprimd(2,1)+kpg(ig,2)*gprimd(2,2)+kpg(ig,3)*gprimd(2,3)
+@@ -463,8 +463,8 @@ subroutine mkffnl(dimekb,dimffnl,ekb,ffn
+                mua=alpha(mu);mub=beta(mu)
+                rmetab=rmet(mua,mub)
+ !$OMP PARALLEL DO PRIVATE(ig) &
+-!$OMP&SHARED(npw,mu,mua,mub,iffnl,itypat) &
+-!$OMP&SHARED(ffnl,kpgn,kpgnorm_inv,rmetab,ylm,ylm_gr,wk_ffnl1,wk_ffnl2,wk_ffnl3)
++!$OMP&SHARED(npw,mu,mua,mub,iffnl,itypat)
++!$OMP&SHARED(ffnl,kpgn,kpgnorm_inv,rmetab,ylm,ylm_gr,wf_ffnl1,wk_ffnl2,wk_ffnl3)
+                do ig=1,npw
+                  ffnl(ig,4+mu,iffnl,itypat)= &
+ &                 ylm_gr(ig,3+mu,ilm)*wk_ffnl1(ig) &
+diff -rupN abinit-6.12.1-mod/src/65_nonlocal/mkkpg.F90 abinit-6.12.1/src/65_nonlocal/mkkpg.F90
+--- abinit-6.12.1-mod/src/65_nonlocal/mkkpg.F90	2012-02-14 15:06:20.420480000 +1100
++++ abinit-6.12.1/src/65_nonlocal/mkkpg.F90	2012-01-31 07:43:38.000000000 +1100
+@@ -90,7 +90,7 @@ subroutine mkkpg(kg,kpg,kpt,nkpg,npw)
+ !-- Compute (k+G) --
+  do mu=1,3
+ !$OMP PARALLEL DO PRIVATE(ipw) &
+-!$OMP&SHARED(npw,kpg,kpt,kg)
++!$OMP&SHARED(two_pi,npw,kpg,kpt,kg)
+    do ipw=1,npw
+      kpg(ipw,mu)=kpt(mu)+dble(kg(mu,ipw))
+    end do
+@@ -102,7 +102,7 @@ subroutine mkkpg(kg,kpg,kpt,nkpg,npw)
+    do mu=4,9
+      mua=alpha(mu-3);mub=beta(mu-3)
+ !$OMP PARALLEL DO PRIVATE(ipw) &
+-!$OMP&SHARED(mua,mub,mu,npw,kpg)
++!$OMP&SHARED(mua,mub,mu,npw,kpg,kkpg)
+      do ipw=1,npw
+        kpg(ipw,mu)=kpg(ipw,mua)*kpg(ipw,mub)
+      end do
+diff -rupN abinit-6.12.1-mod/src/65_nonlocal/opernla_ylm.F90 abinit-6.12.1/src/65_nonlocal/opernla_ylm.F90
+--- abinit-6.12.1-mod/src/65_nonlocal/opernla_ylm.F90	2012-02-14 15:55:54.872907000 +1100
++++ abinit-6.12.1/src/65_nonlocal/opernla_ylm.F90	2012-01-31 07:43:53.000000000 +1100
+@@ -162,9 +162,9 @@ subroutine opernla_ylm(choice,cplex,dimf
+ 
+ !  Loops (blocking)
+ !$OMP PARALLEL DEFAULT(PRIVATE) &
+-!$OMP&SHARED(cplex,nincat,nloalg,npw,nlmn,indlmn,ia3) &
+-!$OMP&SHARED(idir,ipw0,ipwshft,choice_,signs,ndgxdt,nd2gxdt) &
+-!$OMP&SHARED(vect,ph3d,ffnl,scalr,scali) & 
++!$OMP&SHARED(cplex,nincat,nloalg,npw,nlmn,indlmn,ia3)
++!$OMP&SHARED(idir,ipw0,ipwshft,choice_,signs,ndgxdt,nd2gxdt,alpha,beta)
++!$OMP&SHARED(vect,ph3d,ffnl,scalr,scali)
+ !$OMP&SHARED(gx,dgxdt,d2gxdt,kpg)
+ !$OMP DO
+ 
+diff -rupN abinit-6.12.1-mod/src/65_nonlocal/opernlb_ylm.F90 abinit-6.12.1/src/65_nonlocal/opernlb_ylm.F90
+--- abinit-6.12.1-mod/src/65_nonlocal/opernlb_ylm.F90	2012-02-14 15:55:47.124504000 +1100
++++ abinit-6.12.1/src/65_nonlocal/opernlb_ylm.F90	2012-01-31 07:43:50.000000000 +1100
+@@ -174,7 +174,7 @@ subroutine opernlb_ylm(choice,cplex,cple
+ 
+ !  Loops (blocking)
+ !$OMP PARALLEL DEFAULT(PRIVATE) &
+-!$OMP&SHARED(choice,nincat,nloalg,ia3,ipwshft,npw,nlmn,nspinor,wt,indlmn) &
++!$OMP&SHARED(choice,nincat,nloalg,ia3,ipwshft,npw,nlmn,nspinor,wt,indlmn)
+ !$OMP&SHARED(ffnl,gxfac,gxfac_sij,gxfac_,gxfacs_,dgxdtfac,dgxdtfac_sij,dgxdtfac_,dgxdtfacs_,kpg,ph3d,vect)
+ !$OMP DO
+ 
+diff -rupN abinit-6.12.1-mod/src/66_wfs/getghc.F90 abinit-6.12.1/src/66_wfs/getghc.F90
+--- abinit-6.12.1-mod/src/66_wfs/getghc.F90	2012-02-14 16:17:07.382744000 +1100
++++ abinit-6.12.1/src/66_wfs/getghc.F90	2012-01-31 07:43:39.000000000 +1100
+@@ -690,8 +690,8 @@ subroutine getghc(cpopt,cwavef,cwaveprj,
+              end if
+            end if
+          end do ! ig
+-!$OMP END PARALLEL DO
+        end do ! ispinor
++!$OMP END PARALLEL DO
+      end do ! idat
+    else
+ !    Here, debugging section
+@@ -731,8 +731,8 @@ subroutine getghc(cpopt,cwavef,cwaveprj,
+            ghc(re,igspinor)=ghcre
+            ghc(im,igspinor)=ghcim
+          end do ! ig
+-!$OMP END PARALLEL DO
+        end do ! ispinor
++!$OMP END PARALLEL DO
+      end do ! idat
+    end if
+ 
+diff -rupN abinit-6.12.1-mod/src/66_wfs/projbd.F90 abinit-6.12.1/src/66_wfs/projbd.F90
+--- abinit-6.12.1-mod/src/66_wfs/projbd.F90	2012-02-15 08:34:43.019664000 +1100
++++ abinit-6.12.1/src/66_wfs/projbd.F90	2012-01-31 07:43:47.000000000 +1100
+@@ -186,7 +186,7 @@ subroutine projbd(cg,direc,iband0,icg,is
+        index1=npw_sp*(iband-1)+icg
+        ar=scprod(1,iband);ai=scprod(2,iband)
+ !$OMP PARALLEL DO PRIVATE(ipw,cg_re,cg_im) &
+-!$OMP&SHARED(ar,ai,cg,direc,index1,npw_sp)
++!$OMP&SHARED(ar,ai,cg,direc,index,npw_sp)
+        do ipw=1,npw_sp
+          cg_re=cg(1,index1+ipw) ; cg_im=cg(2,index1+ipw)
+          direc(1,ipw)=direc(1,ipw)-ar*cg_re+ai*cg_im
+diff -rupN abinit-6.12.1-mod/src/66_wfs/pw_orthon.F90 abinit-6.12.1/src/66_wfs/pw_orthon.F90
+--- abinit-6.12.1-mod/src/66_wfs/pw_orthon.F90	2012-02-15 08:42:18.029413000 +1100
++++ abinit-6.12.1/src/66_wfs/pw_orthon.F90	2012-01-31 07:43:41.000000000 +1100
+@@ -365,22 +365,19 @@ subroutine pw_orthon(icg,igsc,istwf_k,mc
+ !            end if
+ 
+ !            Then subtract the appropriate amount of the lower state
++!$OMP PARALLEL DO PRIVATE(ii) &
++!$OMP&SHARED(doti,dotr,ii1,ii2,nelem,vecnm)
+ #ifdef FC_INTEL
+ !            DIR$ ivdep
+ #endif
+              ii1=nelem*(ivec-1)+icg;ii2=nelem*(ivec2-1)+icg
+-!$OMP PARALLEL DO PRIVATE(ii) &
+-!$OMP&SHARED(doti,dotr,ii1,ii2,nelem,vecnm)
+              do ii=1,nelem
+                vecnm(1,ii2+ii)=vecnm(1,ii2+ii)-dotr*vecnm(1,ii1+ii)+&
+ &               doti*vecnm(2,ii1+ii)
+                vecnm(2,ii2+ii)=vecnm(2,ii2+ii)-doti*vecnm(1,ii1+ii)-&
+ &               dotr*vecnm(2,ii1+ii)
+              end do
+-!$OMP END PARALLEL DO
+              ii1=nelem*(ivec-1)+igsc;ii2=nelem*(ivec2-1)+igsc
+-!$OMP PARALLEL DO PRIVATE(ii) &
+-!$OMP&SHARED(doti, dotr, ii1, ii2, nelem, vecnm)
+              do ii=1,nelem
+                ovl_vecnm(1,ii2+ii)=ovl_vecnm(1,ii2+ii)&
+ &               -dotr*ovl_vecnm(1,ii1+ii)&
+@@ -484,20 +481,17 @@ subroutine pw_orthon(icg,igsc,istwf_k,mc
+ !            end if
+ 
+ !            Then subtract the appropriate amount of the lower state
++!$OMP PARALLEL DO PRIVATE(ii) &
++!$OMP&SHARED(dotr,ii1,ii2,nelem,vecnm)
+ #ifdef FC_INTEL
+ !            DIR$ ivdep
+ #endif
+              ii1=nelem*(ivec-1)+icg;ii2=nelem*(ivec2-1)+icg
+-!$OMP PARALLEL DO PRIVATE(ii) &
+-!$OMP&SHARED(dotr,ii1,ii2,nelem,vecnm)
+              do ii=1,nelem
+                vecnm(1,ii2+ii)=vecnm(1,ii2+ii)-dotr*vecnm(1,ii1+ii)
+                vecnm(2,ii2+ii)=vecnm(2,ii2+ii)-dotr*vecnm(2,ii1+ii)
+              end do
+-!$OMP END PARALLEL DO
+              ii1=nelem*(ivec-1)+igsc;ii2=nelem*(ivec2-1)+igsc
+-!$OMP PARALLEL DO PRIVATE(ii) &
+-!$OMP&SHARED(dotr, ii1, ii2, nelem, vecnm)             
+              do ii=1,nelem
+                ovl_vecnm(1,ii2+ii)=ovl_vecnm(1,ii2+ii)-dotr*ovl_vecnm(1,ii1+ii)
+                ovl_vecnm(2,ii2+ii)=ovl_vecnm(2,ii2+ii)-dotr*ovl_vecnm(2,ii1+ii)
+@@ -589,20 +583,17 @@ subroutine pw_orthon(icg,igsc,istwf_k,mc
+ !            end if
+ 
+ !            Then subtract the appropriate amount of the lower state
++!$OMP PARALLEL DO PRIVATE(ii) &
++!$OMP&SHARED(dotr,ii1,ii2,nelem,vecnm)
+ #ifdef FC_INTEL
+ !            DIR$ ivdep
+ #endif
+              ii1=nelem*(ivec-1)+icg;ii2=nelem*(ivec2-1)+icg
+-!$OMP PARALLEL DO PRIVATE(ii) &
+-!$OMP&SHARED(dotr,ii1,ii2,nelem,vecnm)
+              do ii=1,nelem
+                vecnm(1,ii2+ii)=vecnm(1,ii2+ii)-dotr*vecnm(1,ii1+ii)
+                vecnm(2,ii2+ii)=vecnm(2,ii2+ii)-dotr*vecnm(2,ii1+ii)
+              end do
+-!$OMP END PARALLEL DO
+              ii1=nelem*(ivec-1)+igsc;ii2=nelem*(ivec2-1)+igsc
+-!$OMP PARALLEL DO PRIVATE(ii) &
+-!$OMP&SHARED(dotr, ii1, ii2, nelem, vecnm)
+              do ii=1,nelem
+                ovl_vecnm(1,ii2+ii)=ovl_vecnm(1,ii2+ii)-dotr*ovl_vecnm(1,ii1+ii)
+                ovl_vecnm(2,ii2+ii)=ovl_vecnm(2,ii2+ii)-dotr*ovl_vecnm(2,ii1+ii)
+diff -rupN abinit-6.12.1-mod/src/67_common/cgwf.F90 abinit-6.12.1/src/67_common/cgwf.F90
+--- abinit-6.12.1-mod/src/67_common/cgwf.F90	2012-02-15 08:53:40.809998000 +1100
++++ abinit-6.12.1/src/67_common/cgwf.F90	2012-01-31 07:43:53.000000000 +1100
+@@ -879,24 +879,24 @@ subroutine cgwf(berryopt,cg,cgq,chkexit,
+ !          Compute the steepest descent direction
+            if (gen_eigenpb) then
+ !            Store <G|H-lambda.S|C> in direc
++!$OMP PARALLEL DO PRIVATE(ipw) &
++!$OMP&SHARED(direc,npw,nspinor,vresid)
+              direc(1:2,1:npw*nspinor)=vresid(1:2,1:npw*nspinor)
+-!!$OMP PARALLEL DO PRIVATE(ipw) &
+-!!$OMP&SHARED(direc,npw,nspinor,vresid)
+-!!            do ipw=1,npw*nspinor
+-!!            direc(1,ipw)=vresid(1,ipw)
+-!!            direc(2,ipw)=vresid(2,ipw)
+-!!            end do
+-!!$OMP END PARALLEL DO
++!            do ipw=1,npw*nspinor
++!            direc(1,ipw)=vresid(1,ipw)
++!            direc(2,ipw)=vresid(2,ipw)
++!            end do
++!$OMP END PARALLEL DO
+            else
+ !            Store <G|H|C> in direc
++!$OMP PARALLEL DO PRIVATE(ipw) &
++!$OMP&SHARED(direc,ghc,npw,nspinor)
+              direc(1:2,1:npw*nspinor)=ghc(1:2,1:npw*nspinor)
+-!!$OMP PARALLEL DO PRIVATE(ipw) &
+-!!$OMP&SHARED(direc,ghc,npw,nspinor)
+-!!            do ipw=1,npw*nspinor
+-!!            direc(1,ipw)=ghc(1,ipw)
+-!!            direc(2,ipw)=ghc(2,ipw)
+-!!            end do
+-!!$OMP END PARALLEL DO
++!            do ipw=1,npw*nspinor
++!            direc(1,ipw)=ghc(1,ipw)
++!            direc(2,ipw)=ghc(2,ipw)
++!            end do
++!$OMP END PARALLEL DO
+            end if
+            ABI_DEALLOCATE(vresid)
+ !          
+@@ -1414,7 +1414,6 @@ subroutine cgwf(berryopt,cg,cgq,chkexit,
+                gsc(1,ipw+igsc_shift)=scwavef(1,ipw)
+                gsc(2,ipw+igsc_shift)=scwavef(2,ipw)
+              end do
+-!$OMP END PARALLEL DO
+              if (berryopt == 4) then  ! must update cprj for the new wavefunction
+                call getcprj(1,0,cwavef,cprj_band_srt,gs_hamk%dimekb1,gs_hamk%dimekb2,&
+ &               dimffnl,gs_hamk%ekb,ffnl,0,gs_hamk%indlmn,istwf_k,kg_k,kpg,gs_hamk%kpoint,&
+@@ -1425,6 +1424,7 @@ subroutine cgwf(berryopt,cg,cgq,chkexit,
+ &               dtefield%nband_occ,1,mpi_enreg,natom,1,dtefield%nband_occ,&
+ &               dimlmn,1,1,spaceComm_distrb,0)
+              end if
++!$OMP END PARALLEL DO
+            end if
+            if(wfopta10==2 .or. wfopta10==3)then
+ !            Need to keep track of ghcws, in order to avoid recomputing it
+diff -rupN abinit-6.12.1-mod/src/67_common/forstrnps.F90 abinit-6.12.1/src/67_common/forstrnps.F90
+--- abinit-6.12.1-mod/src/67_common/forstrnps.F90	2012-02-15 09:00:48.786424000 +1100
++++ abinit-6.12.1/src/67_common/forstrnps.F90	2012-01-31 07:43:44.000000000 +1100
+@@ -432,10 +432,10 @@ subroutine forstrnps(atindx1,cg,dtefield
+ !    Prepare kinetic contribution to stress tensor (Warning : the symmetry
+ !    has not been broken, like in mkkin.f or kpg3.f . It should
+ !    be, in order to be coherent).
+-     if (stress_needed==1) then
+ !$OMP PARALLEL DO PRIVATE(fact_kin,ipw,kgc1,kgc2,kgc3,kin,xx) &
+ !$OMP&SHARED(ecut,ecutsm,ecutsm_inv) &
+-!$OMP&SHARED(gprimd,htpisq,kg_k,kpoint,kstr1,kstr2,kstr3,kstr4,kstr5,kstr6,npw_k)       
++!$OMP&SHARED(gprimd,htpisq,kg_k,kpoint,kstr1,kstr2,kstr3,kstr4,kstr5,kstr6,npw_k)
++     if (stress_needed==1) then
+        do ipw=1,npw_k
+ !        Compute Cartesian coordinates of (k+G)
+          kgc1=gprimd(1,1)*(kpoint(1)+kg_k(1,ipw))+&
+diff -rupN abinit-6.12.1-mod/src/67_common/mkrho.F90 abinit-6.12.1/src/67_common/mkrho.F90
+--- abinit-6.12.1-mod/src/67_common/mkrho.F90	2012-02-15 09:07:37.934229000 +1100
++++ abinit-6.12.1/src/67_common/mkrho.F90	2012-01-31 07:43:46.000000000 +1100
+@@ -237,7 +237,7 @@ subroutine mkrho(cg,dtset,gprimd,irrzon,
+ 
+ !zero the charge density array in real space
+  do ispden=1,dtset%nspden
+-!$OMP PARALLEL DO PRIVATE(ifft) SHARED(rhor,ispden)
++!$OMP PARALLEL DO PRIVATE(ifft) SHARED(dtset%nfft,rhor,zero,ispden)
+    do ifft=1,dtset%nfft
+      rhor(ifft,ispden)=zero
+    end do
+@@ -744,7 +744,7 @@ subroutine mkrho(cg,dtset,gprimd,irrzon,
+      if(ioption==1 .or. ioption==2) then
+        do ispden=1,dtset%nspden
+ !$OMP PARALLEL DO PRIVATE(ifft) &
+-!$OMP&SHARED(taur_alphabeta,rhor,alpha,beta)
++!$OMP&SHARED(dtset%nfft,taur_alphabeta,rhor,alpha,beta)
+          do ifft=1,dtset%nfft
+            taur_alphabeta(ifft,ispden,alpha,beta) = rhor(ifft,ispden)
+          end do
+@@ -762,7 +762,7 @@ subroutine mkrho(cg,dtset,gprimd,irrzon,
+ !  zero rhor array in real space
+    do ispden=1,dtset%nspden
+ !$OMP PARALLEL DO PRIVATE(ifft) &
+-!$OMP&SHARED(rhor,ispden)
++!$OMP&SHARED(dtset%nfft,rhor,ispden,zero)
+      do ifft=1,dtset%nfft
+        rhor(ifft,ispden)=zero
+      end do
+@@ -771,7 +771,7 @@ subroutine mkrho(cg,dtset,gprimd,irrzon,
+    do alpha = 1, nalpha
+      do ispden=1,dtset%nspden
+ !$OMP PARALLEL DO PRIVATE(ifft) &
+-!$OMP&SHARED(rhor,ispden)
++!$OMP&SHARED(dtset%nfft,rhor,ispden,zero)
+        do ifft=1,dtset%nfft
+          rhor(ifft,ispden) = rhor(ifft,ispden) + taur_alphabeta(ifft,ispden,alpha,1)
+        end do
+@@ -788,7 +788,7 @@ subroutine mkrho(cg,dtset,gprimd,irrzon,
+      dtset%paral_kgb,phnons,rhog,rhor,rprimd,dtset%symafm,dtset%symrel)
+      if(ioption==1)then
+ !$OMP PARALLEL DO PRIVATE(ifft) &
+-!$OMP&SHARED(ispden,rhog,rhor)
++!$OMP&SHARED(dtset%nfft,dtset%nspden,ispden,rhog,rhor,zero)
+        do ifft=1,dtset%nfft
+          do ispden=1,dtset%nspden
+            rhor(ifft,ispden)=1.0d0/2.0d0*rhor(ifft,ispden)
+diff -rupN abinit-6.12.1-mod/src/67_common/odamix.F90 abinit-6.12.1/src/67_common/odamix.F90
+--- abinit-6.12.1-mod/src/67_common/odamix.F90	2012-02-15 09:12:40.905874000 +1100
++++ abinit-6.12.1/src/67_common/odamix.F90	2012-01-31 07:43:58.000000000 +1100
+@@ -565,7 +565,7 @@ subroutine odamix(deltae,dtset,efield_do
+ 
+  do ispden=1,min(dtset%nspden,2)
+ !$OMP PARALLEL DO PRIVATE(ifft) &
+-!$OMP&SHARED(ispden,nfft,vhartr,vpsp,vxc)
++!$OMP&SHARED(ispden,nfft,dtset%nspden,vhartr,vnew,vpsp,vxc)
+    do ifft=1,nfft
+      vtrial(ifft,ispden)=vhartr(ifft)+vpsp(ifft)+vxc(ifft,ispden)
+    end do
+diff -rupN abinit-6.12.1-mod/src/67_common/rhotov.F90 abinit-6.12.1/src/67_common/rhotov.F90
+--- abinit-6.12.1-mod/src/67_common/rhotov.F90	2012-02-15 09:16:49.389778000 +1100
++++ abinit-6.12.1/src/67_common/rhotov.F90	2012-01-31 07:43:37.000000000 +1100
+@@ -317,7 +317,7 @@ subroutine rhotov(dtset,energies,gprimd,
+    if (dtset%usewvl == 0) then
+      do ispden=1,min(dtset%nspden,2)
+ !$OMP PARALLEL DO PRIVATE(ifft) &
+-!$OMP&SHARED(ispden,nfft,vhartr,vnew,vpsp,vresidnew,vtrial,vxc)
++!$OMP&SHARED(ispden,nfft,dtset%nspden,vhartr,vnew,vpsp,vresidnew,vtrial,vxc)
+        do ifft=1,nfft
+          vnew(ifft,ispden)=vhartr(ifft)+vpsp(ifft)+vxc(ifft,ispden)+vzeeman(ispden)
+          vresidnew(ifft,ispden)=vnew(ifft,ispden)-vtrial(ifft,ispden)
+@@ -385,7 +385,7 @@ subroutine rhotov(dtset,energies,gprimd,
+    if (dtset%usewvl == 0) then
+      do ispden=1,min(dtset%nspden,2)
+ !$OMP PARALLEL DO PRIVATE(ifft) &
+-!$OMP&SHARED(ispden,nfft,vhartr,vnew,vpsp,vxc)
++!$OMP&SHARED(ispden,nfft,dtset%nspden,vhartr,vnew,vpsp,vxc)
+        do ifft=1,nfft
+          vtrial(ifft,ispden)=vhartr(ifft)+vpsp(ifft)+vxc(ifft,ispden)+vzeeman(ispden)
+        end do
+diff -rupN abinit-6.12.1-mod/src/72_response/accrho3.F90 abinit-6.12.1/src/72_response/accrho3.F90
+--- abinit-6.12.1-mod/src/72_response/accrho3.F90	2012-02-15 09:23:43.513551000 +1100
++++ abinit-6.12.1/src/72_response/accrho3.F90	2012-01-31 07:43:42.000000000 +1100
+@@ -197,9 +197,9 @@ subroutine accrho3(counter,cplex,cwave0,
+      if(prtvol>=10)then
+        call status(counter,filstat,iexit,level,'get eloc0_k   ')
+      end if
+-     valuer=zero
+ !$OMP PARALLEL DO PRIVATE(i1,i2,i3) REDUCTION(+:valuer) &
+ !$OMP&SHARED(n1,n2,n3,vlocal,wfraug1)
++     valuer=zero
+      do i3=1,n3
+        do i2=1,n2
+          do i1=1,n1
+diff -rupN abinit-6.12.1-mod/src/72_response/eltfrnl3.F90 abinit-6.12.1/src/72_response/eltfrnl3.F90
+--- abinit-6.12.1-mod/src/72_response/eltfrnl3.F90	2012-02-15 09:25:56.297505000 +1100
++++ abinit-6.12.1/src/72_response/eltfrnl3.F90	2012-01-31 07:43:49.000000000 +1100
+@@ -281,14 +281,14 @@ subroutine eltfrnl3(atindx,atindx1,cg,el
+        if (psps%useylm==1) then
+          do ilm=1,mpsang*mpsang
+ !$OMP PARALLEL DO PRIVATE(ipw) &
+-!$OMP&SHARED(ikg,ilm,ylm,ylm_k,npw_k)
++!$OMP&SHARED(ikg,ilm,ylm,ylm_k_k,npw_k)
+            do ipw=1,npw_k
+              ylm_k(ipw,ilm)=ylm(ipw+ikg,ilm)
+            end do
+ !$OMP END PARALLEL DO
+            do ii=1,9
+ !$OMP PARALLEL DO PRIVATE(ipw) &
+-!$OMP&SHARED(ikg,ilm,ii,ylmgr,ylmgr_k,npw_k)
++!$OMP&SHARED(ikg,ilm,ii,ylmgr,ylmgr_k_k,npw_k)
+              do ipw=1,npw_k
+                ylmgr_k(ipw,ii,ilm)=ylmgr(ipw+ikg,ii,ilm)
+              end do
+diff -rupN abinit-6.12.1-mod/src/72_response/redgr.F90 abinit-6.12.1/src/72_response/redgr.F90
+--- abinit-6.12.1-mod/src/72_response/redgr.F90	2012-02-15 09:28:26.558966000 +1100
++++ abinit-6.12.1/src/72_response/redgr.F90	2012-01-31 07:43:47.000000000 +1100
+@@ -173,7 +173,7 @@ subroutine redgr (frin,frredgr,mpi_enreg
+    call timab(82,2,tsec)
+ 
+ !$OMP PARALLEL DO PRIVATE(ifft) &
+-!$OMP&SHARED(idir,nfft,work)
++!$OMP&SHARED(idir,ispden,nfft,rhonow,work)
+    do ifft=1,nfft
+      frredgr(ifft,idir)=work(ifft)
+    end do
+diff -rupN abinit-6.12.1-mod/src/72_response/wfkfermi3.F90 abinit-6.12.1/src/72_response/wfkfermi3.F90
+--- abinit-6.12.1-mod/src/72_response/wfkfermi3.F90	2012-02-15 09:32:20.441532000 +1100
++++ abinit-6.12.1/src/72_response/wfkfermi3.F90	2012-01-31 07:43:57.000000000 +1100
+@@ -258,7 +258,7 @@ subroutine wfkfermi3(cg,cgq,cplex,dimekb
+ !  Read ground-state wavefunctions
+    if(mkmem/=0)then
+ !$OMP PARALLEL DO PRIVATE(ipw) &
+-!$OMP&SHARED(cg,cwave0,iband,icg,npw_k)
++!$OMP&SHARED(cg,cwave0,iband,icg,npw_k,dtset%nspinor)
+      do ipw=1,npw_k*dtset%nspinor
+        cwave0(1,ipw)=cg(1,ipw+(iband-1)*npw_k*dtset%nspinor+icg)
+        cwave0(2,ipw)=cg(2,ipw+(iband-1)*npw_k*dtset%nspinor+icg)
+@@ -306,7 +306,7 @@ subroutine wfkfermi3(cg,cgq,cplex,dimekb
+      index_cgq=npw1_k*dtset%nspinor*(iband-1)+icgq
+      factr= rocceig(iband,iband)*invocc
+ !$OMP PARALLEL DO PRIVATE(ii) &
+-!$OMP&SHARED(cgq,cwave1,factr,index_cgq,npw1_k)
++!$OMP&SHARED(cgq,cwave1,facti,factr,index_cgq,npw1_k,dtset%nspinor)
+      do ii=1,npw1_k*dtset%nspinor
+        cwave1(1,ii)= factr*cgq(1,ii+index_cgq)
+        cwave1(2,ii)= factr*cgq(2,ii+index_cgq)
