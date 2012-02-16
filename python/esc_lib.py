@@ -1,8 +1,36 @@
+################################################################################
+#
+# esc_lib.py
+#
 # Library of electronic-structure related code.
+#
+################################################################################
+#
+# Copyright 2012 Kane O'Donnell
+#
+#     This library is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This library is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this library.  If not, see <http://www.gnu.org/licenses/>.
+#
+################################################################################
 # 
-# Note that internally we *always* use atomic units
-# (bohr, hartree, etc) and provide converter routines
-# to deal with other common units such as ang and eV.
+# NOTES
+#
+# 1. Internally we *always* use atomic units (bohr, hartree, etc) and provide 
+# converter routines to deal with other common units such as ang and eV.
+#
+################################################################################
+
+
 from __future__ import division
 from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin
 from numpy.linalg import norm
@@ -74,11 +102,13 @@ def rotate_positions(positions, filename, fileopt=0):
     ...
     
     (if fileopt = 0) where i1 is the atomic index to be rotated and the axis is 
-    formed as the vector between atoms i2 and i3. Rotation is ANTICLOCKWISE 
+    formed as the vector between atoms i2 and i3. Rotation is CLOCKWISE 
     viewed along the axis.
     
-    If fileopt is 1, the format is i1, x1, x2, x3, theta, where xi give the actual
-    axis. This will be normalized before use so units don't matter.
+    If fileopt is 1, the format is i1, x1, x2, x3, o1,o2, o3, theta, where xi 
+    give the actual axis and the oi give the origin of the vector xi for the 
+    rotation. The units of the axis x don't matter, vector o must be given
+    in atomic units (bohr).
     
     Comments marked with # or ! are ignored in the rotation file.
     
@@ -96,6 +126,7 @@ def rotate_positions(positions, filename, fileopt=0):
   
   indices = []
   axes = []
+  origins = []
   angles = []
   
   for line in lines:
@@ -106,36 +137,44 @@ def rotate_positions(positions, filename, fileopt=0):
       a = int(bits[1]) - 1
       b = int(bits[2]) - 1
       axes.append(positions[b] - positions[a])
+      origins.append(positions[a])
       angles.append(float(bits[3]))
     elif fileopt == 1:
       axes.append(array([float(x) for x in bits[1:4]]))
-      angles.append(float(bits[4]))
+      origins.append(array([float(x) for x in bits[4:7]]))
+      angles.append(float(bits[7]))
     else:
       print "rotate_positions: ERROR - fileopt must be 0 or 1, not %d" % fileopt
   
-  for i,a,t in zip(indices, axes, angles):
-    new_positions[i] = rotate(positions[i], a, t)
+  for i,a,o,t in zip(indices, axes, origins,angles):
+    new_positions[i] = rotate(positions[i], a, o, t)
   
   return new_positions
   
-def rotate(vec, axis, angle):
-  """ new_vec = rotate(vec, axis, angle)
+def rotate(pos, axis, origin, angle):
+  """ new_vec = rotate(pos, axis, origin, angle)
     
-    Rotates a vector vec by the specified angle, ANTICLOCKWISE looking along
-    axis.
+    Rotates a coordinate pos by the specified angle, CLOCKWISE looking along
+    axis. Origin of the rotation axis vector is given by the origin parameter,
+    the position coordinate pos is assumed to have an origin of (0,0,0) and is 
+    converted to a vector with respect to origin before the calculation and 
+    restored afterwards.
     
   """
+  
+  # Find the vector from origin to pos.
+  v = pos - origin
     
   # Convert angle to radians
-  r = angle * pi / 180
+  r = float(angle) * pi / 180
     
   # Make sure axis is normalized
   ux, uy, uz = axis/norm(axis)
     
   # Matrices
   UU = matrix([[ux * ux, ux * uy, ux * uz],
-               [ux * uy, uy * uy, uz * uy],
-               [ux * uz, uy * uz, uz * uz]])
+               [ux * uy, uy * uy, uy * uz],
+               [ux * uz, uz * uy, uz * uz]])
   
   UX = matrix([[0, -uz, uy],
                [uz, 0, -ux],
@@ -147,9 +186,9 @@ def rotate(vec, axis, angle):
               
   R = cos(r) * I + sin(r) * UX + (1.0 - cos(r)) * UU
   
-  # Apply matrix to column vector of c.
+  # Apply matrix to column vector of v and restore to a coordinate
   
-  return array(R * matrix(vec).T).flatten()
+  return array(R * matrix(v).T).flatten() + origin
  
 def remove_comments(lines, comment_delim):
     """ stripped = remove_comments(lines, comment_delim)
@@ -1114,4 +1153,38 @@ class Atoms:
         
         return cur_pos, pos_hist
         
+    def rotateAtoms(self, rotation_file, fileopt=0, timestep=0):
+      """ success = Atoms.rotateAtoms(rotation_file, fileopt=0)
+      
+      Apply the rotations specified in rotation_file to an Atoms object positions.
+      
+      We can deal with animation steps here (Default is 0). See the rotate_positions
+      documentation for details on fileopt.
+      
+      """
+      
+      pos = self.positions[timestep]
+      self.positions[timestep] = rotate_positions(pos, rotation_file, fileopt)
+      
+      return True
+      
+    def writeXSF(self, filename):
+      """ success = Atoms.writeXSF(filename)
+      
+      Member function wrapper for esc_lib.write_xsf.
+      
+      """
+      
+      return write_xsf(filename, self.positions, self.species, self.lattice)
+      
+    def writeAbinit(self, filename, xtype="ang", timestep=0):
+      """ success = Atoms.writeAbinit(filename, xtype="ang", timestep=0)
+      
+      Member function wrapper for esc_lib.write_abinit.
+      
+      """
+      
+      return write_abinit(filename, self.positions, self.species, xtype, timestep)
+      
+
             

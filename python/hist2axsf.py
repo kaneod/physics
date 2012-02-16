@@ -1,5 +1,48 @@
 # Converts an abinit HIST file to an animated XSF file for viewing.
 
+################################################################################
+#
+# hist2axsf.py
+#
+# Converts an abinit HIST file to an animated XSF file for viewing.
+#
+################################################################################
+#
+# Created Jan2012 by Kane O'Donnell (Australian Synchrotron).
+#
+################################################################################
+#
+# Copyright 2012 Kane O'Donnell
+#
+#     This library is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This library is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this library.  If not, see <http://www.gnu.org/licenses/>.
+#
+################################################################################
+# 
+# NOTES
+#
+# 1. To get a HIST output file from abinit, you have to compile it with respect
+# to netCDF and enable the trio output to include netcdf.
+#
+# 2. This really should be converted to a standalone script with CLI inputs
+# rather than values you edit as below...
+#
+# 3. The functionality of hist2axsf should eventually also be absorbed into
+# esc_convert rather than sitting here as it just duplicates some things already
+# sorted out in esc_lib.
+#
+################################################################################
+
 from numpy import *
 from Scientific.IO import NetCDF
 
