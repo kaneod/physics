@@ -59,6 +59,13 @@ outfilename = "/home/kane/Desktop/Scratch/out.axsf"
 #ntypat = array([6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, \
 #            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
 ntypat = array(48*[6] + 4 * [7] + 38 * [1])
+#ntypat  = array([int(x) for x in "1 2 1 1 1 1 2 1 1 1 1 2 1 1 1 1 \
+#            2 1 1 1 1 2 1 1 1 1 2 1 1 1 1 2 \
+#            1 1 1 1 2 1 1 1 1 1 1 1 1 1 1 1 \
+#            1 1 2 2 2 2 2 2 2 2 2 2 2 2 2 2 \
+#            2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 \
+#            2 2 2 2 2 2 2 2 2 2 2 2 2 2 3 3 \
+#            3 3".split()])
 infile = NetCDF.NetCDFFile(infilename, 'r')
 print "Opened NetCDF file %s for reading." % infilename
 outfile = open(outfilename, 'w')

@@ -190,8 +190,8 @@ def rotate(pos, axis, origin, angle):
   
   return array(R * matrix(v).T).flatten() + origin
  
-def remove_comments(lines, comment_delim):
-    """ stripped = remove_comments(lines, comment_delim)
+def remove_comments(lines, comment_delim="#",just_blanks=False):
+    """ stripped = remove_comments(lines, comment_delim="#", just_blanks=False)
     
     Takes a sequence of lines (presumably from a data file)
     and strips all comments, including ones at the end of
@@ -203,12 +203,18 @@ def remove_comments(lines, comment_delim):
     case we're going to do line-by-line processing subsequently
     rather than join/splitting (eg. like for XSF files).
     
+    If just_blanks is specified, we only eliminate the blanks.
+    
     """
     
     stripped = []
     for line in lines:
+      if just_blanks:
+        if line.strip() != "":
+          stripped.append(line.strip())
+      else:
         if not (line.strip().startswith(comment_delim) or line.strip() == ""):
-            stripped.append(line.partition(comment_delim)[0].strip())
+          stripped.append(line.partition(comment_delim)[0].strip())
     
     return stripped
     

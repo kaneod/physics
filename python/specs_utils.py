@@ -36,7 +36,98 @@ from esc_lib import remove_comments
 
 DEBUG = True
 
+def line_index(lines, searchstr):
+  """ line_idx = line_index(lines, searchstr):
+  
+  Returns the line index of the first occurence of searchstr (or None).
+  
+  """
+  
+  for i, l in enumerate(lines):
+    if searchstr in l:
+      return i
+  
+  return None
+
 def read_xy(filename):
+  """ data = specs_utils.read_xy(filename)
+  
+  At present, just read and return the xy data from a SPECS xy output. We can
+  make a few educated guesses about the data based on the header but we don't
+  return parsed header values just yet. 
+  
+  The returned list, data, is of the form:
+  
+  data = [set1, set2, set3, ...]
+  
+  where each set is a 10-element list [main, chan1, chan2, ..., chan9] and the
+  external channel bits are empty arrays if external channel data is not
+  present. 
+  
+  """
+  
+  f = open(filename, 'r')
+  lines = f.readlines()
+  f.close()
+  
+  # Blank lines are completely useless in this file format: remove them now.
+  lines = remove_comments(lines, "@")
+  
+  # Check if we have extended channels.
+  if lines[line_index(lines, "External Channel Data:")].split()[4] == "yes":
+    have_channels = True
+    channels = []
+  
+  # Locate commentblocks and other important identifiers
+  comms_begin = []
+  comms_end = []
+  regions = []
+  clabels = []
+  col_count = []
+  in_comment = False
+  
+  for i, line in enumerate(lines):
+    if line.startswith("#"):
+      if not in_comment:
+        comms_begin.append(i)
+        in_comment = True
+      if "Region:" in line:
+        regions.append(i)
+      if "ColumnLabels:" in line:
+        clabels.append(i)
+        col_count.append(len(line.split()) - 2)
+    elif len(line.strip()) == 0:
+      if DEBUG: print "Blank at %d" % i
+    else:
+      if in_comment:
+        comms_end.append(i - 1)
+        in_comment = False
+        
+  if DEBUG: print comms_begin
+  if DEBUG: print comms_end
+  if DEBUG: print regions
+  if DEBUG: print clabels
+  if DEBUG: print col_count
+  
+  # Decide which sets go in which region.
+  set_regions = len(clabels) * [0]
+  for i, c in enumerate(clabels):
+    for j, r in enumerate(regions):
+      if c > r:
+        set_regions[i] = j
+  
+  if DEBUG: print set_regions 
+
+  # Figure out how long each data set is using the comment block sizes.
+  set_lengths = len(clabels) * [0]
+  set_lengths[-1] = len(lines) - comms_end[-1] - 1
+  for i in range(len(set_lengths) - 1):
+    set_lengths[i] = comms_begin[i+1] - comms_end[i] - 1
+    
+  if DEBUG: print set_lengths
+  
+  
+def old_read_xy(filename):
   """ data = specs_utils.read_xy(filename)
   
   At present, just read and return the xy data from a SPECS xy output. We can
@@ -74,6 +165,7 @@ def read_xy(filename):
     elif "External Channel Data Cycle:" in line:
       channels.append(i)
   
+  if DEBUG: print regions
   # Be tricky with the channels.
   channels = array(channels).reshape((-1,9)).tolist()
   if DEBUG: print channels
@@ -86,7 +178,9 @@ def read_xy(filename):
     i = 1
     located = False
     while not located:
-      if lines[r+i].strip().startswith("#"):
+      if DEBUG: print lines[r+i].strip()
+      if lines[r+i].strip().startswith("#") or (len(lines[r+i].strip()) == 0):
+        if DEBUG: print "Line is a comment."
         i = i+1
       else:
         dtstarts.append(r+i)
