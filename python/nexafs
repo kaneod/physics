@@ -122,9 +122,9 @@ mI0 = interp1d(m[3][:,0],m[3][:,1])
 mIx = interp1d(E, [mI(x)/mI0(x) for x in E])
 if c_norm:
   n = read_xy(norm_file)[norm_region]
-  nI = interp1d(n[0][:,0], n[0][:,1])
+  nI = interp1d(n[2][:,0], n[2][:,1])
   nI0 = interp1d(n[3][:,0], n[3][:,1])
-  nIx = interp1d(E, [nI0(x)/nI(x) for x in E])
+  nIx = interp1d(E, [nI(x)/nI0(x) for x in E])
   mIt = interp1d(E, [mIx(x)/nIx(x) for x in E])
 
 
@@ -164,7 +164,7 @@ plot(E,[mIx(x) for x in E])
 title("Normalized by I(0)")
 subplot(223)
 plot(E,[nIx(x) for x in E])
-title("Carbon I(0)/I")
+title("Carbon I/I(0)")
 subplot(224)
 plot(E, [mIt(x) for x in E])
 title("Normalized by carbon.")
