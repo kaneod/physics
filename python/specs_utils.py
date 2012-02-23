@@ -34,7 +34,7 @@ from numpy import array, zeros
 from scipy.interpolate import interp1d
 from esc_lib import remove_comments
 
-DEBUG = True
+DEBUG = False
 
 def line_index(lines, searchstr):
   """ line_idx = line_index(lines, searchstr):
@@ -50,19 +50,18 @@ def line_index(lines, searchstr):
   return None
 
 def read_xy(filename):
-  """ data = specs_utils.read_xy(filename)
+  """ group = specs_utils.read_xy(filename)
   
   At present, just read and return the xy data from a SPECS xy output. We can
   make a few educated guesses about the data based on the header but we don't
   return parsed header values just yet. 
   
-  The returned list, data, is of the form:
+  The returned group is of the form:
   
-  data = [set1, set2, set3, ...]
+  group = [region1, region2, region3, ...]
   
-  where each set is a 10-element list [main, chan1, chan2, ..., chan9] and the
-  external channel bits are empty arrays if external channel data is not
-  present. 
+  where each region is a list [set1, set2, set3]. There may possibly be only
+  one set in each region if there are no extended channels.
   
   """
   
@@ -71,12 +70,7 @@ def read_xy(filename):
   f.close()
   
   # Blank lines are completely useless in this file format: remove them now.
-  lines = remove_comments(lines, "@")
-  
-  # Check if we have extended channels.
-  if lines[line_index(lines, "External Channel Data:")].split()[4] == "yes":
-    have_channels = True
-    channels = []
+  lines = remove_comments(lines, just_blanks=True)
   
   # Locate commentblocks and other important identifiers
   comms_begin = []
@@ -96,17 +90,11 @@ def read_xy(filename):
       if "ColumnLabels:" in line:
         clabels.append(i)
         col_count.append(len(line.split()) - 2)
-    elif len(line.strip()) == 0:
-      if DEBUG: print "Blank at %d" % i
     else:
       if in_comment:
         comms_end.append(i - 1)
         in_comment = False
         
-  if DEBUG: print comms_begin
-  if DEBUG: print comms_end
-  if DEBUG: print regions
-  if DEBUG: print clabels
   if DEBUG: print col_count
   
   # Decide which sets go in which region.
@@ -127,109 +115,69 @@ def read_xy(filename):
   if DEBUG: print set_lengths
   
   
-def old_read_xy(filename):
-  """ data = specs_utils.read_xy(filename)
+  # Generate a raw datastream and organize into regions/sets to return.
+  raw = remove_comments(lines, "#")
+  raw = array([float(x) for x in " ".join(raw).split()])
   
-  At present, just read and return the xy data from a SPECS xy output. We can
-  make a few educated guesses about the data based on the header but we don't
-  return parsed header values just yet. 
+  group = []
   
-  The returned list, data, is of the form:
+  for v,c,r in zip(set_lengths, col_count, set_regions):
+    curset = raw[0:v*c].reshape((v,c))
+    raw = raw[v*c:]
+    if len(group) < r+1:
+      group.append([curset])
+    else:
+      group[r].append(curset)
+    if DEBUG: print "Adding data of shape %d x %d to group %d" % (v,c,r)
+    
+  return group
   
-  data = [set1, set2, set3, ...]
+def check_xy(filename):
+  """ is_xy = specs_utils.check_xy(filename)
   
-  where each set is a 10-element list [main, chan1, chan2, ..., chan9] and the
-  external channel bits are empty arrays if external channel data is not
-  present. 
+  Checks that a file is actually a specs-written xy file.
   
   """
   
   f = open(filename, 'r')
-  lines = f.readlines()
+  
+  if f:
+    for line in f:
+      # This could theoretically run over the whole file but in practice
+      # it should break and leave at the first line.
+      if ("Created by:" in line) and ("SpecsLab2" in line):
+        f.close()
+        return True
+  else:
+    print "(specs_utils.check_xy) ERROR: File %s could not be opened for reading." % filename
+    return False
+
+def header_xy(filename):
+  """ group_name, region_names, all_comments = specs_utils.header_xy(filename)
+  
+  Returns the group and region labels for a given XY file, plus all lines
+  that start with comments for post-processing.
+  
+  """
+  
+  if check_xy(filename):
+    f = open(filename, 'r')
+  
+  group_name = "None"
+  comments = []
+  region_names = []
+  for line in f:
+    if line.startswith("#"):
+      comments.append(line)
+    if "Group:" in line:
+      group_name = line.partition("Group:")[2].strip()
+    if "Region:" in line:
+      region_names.append(line.partition("Region:")[2].strip())
+  
   f.close()
   
-  data = []
-  
-  # Check whether we have extended channels.
-  if lines[8].split()[4] == "yes":
-    have_channels=True
-    channels = []
-  
-  # Locate the start of each region using the "Region:" tag.
-  # We also look for channels here - there is no hassle separating them
-  # because we know there are always only 9 sets if they are present.
-  regions = []
-  for i,line in enumerate(lines):
-    if "Region:" in line.split():
-      regions.append(i)
-    elif "External Channel Data Cycle:" in line:
-      channels.append(i)
-  
-  if DEBUG: print regions
-  # Be tricky with the channels.
-  channels = array(channels).reshape((-1,9)).tolist()
-  if DEBUG: print channels
-  
-  if DEBUG: print "Found %d regions." % len(regions)
-  
-  # Locate the start of the data in each region.
-  dtstarts = []
-  for r in regions:
-    i = 1
-    located = False
-    while not located:
-      if DEBUG: print lines[r+i].strip()
-      if lines[r+i].strip().startswith("#") or (len(lines[r+i].strip()) == 0):
-        if DEBUG: print "Line is a comment."
-        i = i+1
-      else:
-        dtstarts.append(r+i)
-        located = True
-  
-  # For each region, read the number of values and infer the number of columns.
-  # Note: the columns read is a dirty hack...
-  dtnvals = []
-  dtncols = []
-  for r,d in zip(regions, dtstarts):
-    for line in lines[r:d]:
-      if "Values/Curve" in line:
-        dtnvals.append(int(line.split()[2]))
-        if DEBUG: print "%s values in region starting at line %d." % (line.split()[2], r)
-      elif "ColumnLabels" in line:
-        dtncols.append(len(line.split()) - 2)
-        if DEBUG: print "%d columns for this region." % (len(line.split())-2)  
-  
-  raw = remove_comments(lines, "#")
-  raw = array([float(x) for x in " ".join(raw).split()])
-  
-  # If we have channels, need to figure out how many columns in each,
-  # then interleave with the dtnvals and dtncols lists.
-  if have_channels:
-    cdtnvals = []
-    cdtncols = []
-    for v,d,c in zip(dtnvals, dtncols, channels):
-      cdtnvals = cdtnvals + 10 * [v]
-      cdtncols.append(d)
-      for i in [0,1,2,3,4,5,6,7,8]:
-        cdtncols.append(len(lines[c[i]+1].split()) - 2)    
-    dtnvals = cdtnvals
-    dtncols = cdtncols
-  
-  # Read and store data.
-  for v, c in zip(dtnvals, dtncols):
-    curset = raw[0:v*c].reshape((v,c))
-    raw = raw[v*c:]
-    data.append(curset)
-  
-  if have_channels:
-    step = 10  
-    sets = [data[i:i+step] for i in range(0, len(data), step)]
-  else:
-    sets = []
-    for d in data:
-      sets.append([d] + 9 * [array([])])
-    
-  return sets
+  return group_name, region_names, comments
+     
     
 def make_interps(filename, columnx=0, columny=1, kind='linear'):
   """ interps, data = specs_utils.make_interps(filename, columnx=0, columny=1, kind='linear')
