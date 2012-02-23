@@ -1,0 +1,172 @@
+#!/usr/bin/env python
+################################################################################
+#
+# nexafs
+#
+# Program to do basic nexafs data processing based on SpecsLab xy ASCII output.
+#
+################################################################################
+#
+# Copyright 2012 Kane O'Donnell
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+################################################################################
+# 
+# NOTES
+#
+#
+#
+################################################################################
+
+from __future__ import division
+from sys import exit
+from specs_utils import check_xy, header_xy, read_xy
+from pylab import plot, ion, figure, subplot, title
+from math import ceil
+from scipy.interpolate import interp1d
+
+import Tkinter, tkFileDialog
+#import argparse
+
+## Need to parse some optional arguments
+#parser = argparse.ArgumentParser(description="Program to do basic NEXAFS data processing based on SpecsLab xy ASCII output")
+
+### BEGIN PROGRAM EXECUTION STREAM
+print "Welcome to NEXAFS!"
+print ""
+
+def plot_hemi(filename):
+
+  group = read_xy(filename)
+  ion()
+  figure()
+  for i, g in enumerate(group):
+    subplot(int(ceil(len(group) / 2)), 2, i+1)
+    plot(g[0][:,0], g[0][:,1])
+  return
+
+def main_menu(prompt="Please enter the name of the file you wish to process"):
+  
+  print prompt
+  main_file = tkFileDialog.askopenfilename(parent=root, title="Choose an XY file")
+  print "\nThankyou. Opening file %s..." % main_file
+  print ""
+
+  is_xy = check_xy(main_file)
+  if is_xy:
+    print "Looks like %s is an XY file."
+  else:
+    print "File %s is not a SpecsLab XY file: if you are sure it is,"
+    print "check that you haven't messed with the file and that your export"
+    print "settings are correct."
+  
+  group_name, region_names, all_comments = header_xy(main_file)
+
+  print "Input file is from the group %s" % group_name
+  have_region = False
+  while not have_region:
+    print "Select a region to process from the following:"
+    for i,r in enumerate(region_names):
+      print "%d\t%s" % (i, r)
+    print "p\tPlot them, I can't tell just from the region names."
+    print "n\tEnter a new filename."
+    print "q\tQuit."
+    region = raw_input("input> ")
+  
+    if region == "q":
+      exit(0)
+    elif region == "n":
+      return main_menu()
+    elif region == "p":
+      plot_hemi(main_file)
+    else:
+      try:
+        region = int(region)
+        if region < len(region_names):
+          return main_file, region
+        else:
+          print "(nexafs.main_menu) ERROR: Unrecognized option '%s'." % region
+      except ValueError:
+        print "(nexafs.main_menu) ERROR: Unrecognized option '%s'." % region
+
+root = Tkinter.Tk()
+main_file, region = main_menu()
+print "Processing region %d. Do you wish to carbon-normalize? (y/n)" % region
+c_norm = raw_input("input> ").lower()
+if c_norm == "y" or c_norm == "yes":
+  norm_file, norm_region = main_menu("Please select a file to normalize against.")
+  print "Using region %d of %s for normalization." % (norm_region, norm_file)
+  c_norm = True
+else:
+  print "Not normalizing for carbon."
+  c_norm = False
+
+# Generate interpolators for our selected region(s)
+ion()
+m = read_xy(main_file)[region]
+E = m[0][:,0]
+mI = interp1d(m[0][:,0], m[0][:,1])
+mI0 = interp1d(m[3][:,0],m[3][:,1])
+mIx = interp1d(E, [mI(x)/mI0(x) for x in E])
+if c_norm:
+  n = read_xy(norm_file)[norm_region]
+  nI = interp1d(n[0][:,0], n[0][:,1])
+  nI0 = interp1d(n[3][:,0], n[3][:,1])
+  nIx = interp1d(E, [nI0(x)/nI(x) for x in E])
+  mIt = interp1d(E, [mIx(x)/nIx(x) for x in E])
+
+
+# Make lots of lovely plots
+ion()
+#figure("Data from file %s" % main_file)
+figure()
+subplot(311)
+plot(E,[mI(x) for x in E])
+title("Raw hemi intensity")
+subplot(312)
+plot(E,[mI0(x) for x in E])
+title("I(0)")
+subplot(313)
+plot(E,[mIx(x) for x in E])
+title("Normalized by I(0)")
+
+#figure("Nomalization data from file %s" % norm_file)
+figure()
+subplot(311)
+plot(E,[nI(x) for x in E])
+title("Raw hemi intensity")
+subplot(312)
+plot(E,[nI0(x) for x in E])
+title("I(0)")
+subplot(313)
+plot(E,[nIx(x) for x in E])
+title("Normalized by I(0)")
+
+#figure("Carbon normalization")
+figure()
+subplot(221)
+plot(E,[mI(x) for x in E])
+title("Raw hemi intensity")
+subplot(222)
+plot(E,[mIx(x) for x in E])
+title("Normalized by I(0)")
+subplot(223)
+plot(E,[nIx(x) for x in E])
+title("Carbon I(0)/I")
+subplot(224)
+plot(E, [mIt(x) for x in E])
+title("Normalized by carbon.")
+print "Press enter to quit."
+quit = raw_input("press-enter> ") 
