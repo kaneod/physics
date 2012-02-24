@@ -35,6 +35,7 @@ from __future__ import division
 from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin
 from numpy.linalg import norm
 from libabitools import io
+from Scientific.IO import NetCDF
 
 # Element dictionaries
 
@@ -797,6 +798,12 @@ class Atoms:
         
         "abinit" : Abinit input file.
         
+        "elk" : Elk input file.
+        
+        "NetCDF" : Abinit NetCDF output. Note: this importer is not very clever
+        and will put in default values for the species if they cannot be found -
+        default is all atoms are carbon.
+        
         """
         
         if filetype == "XSF":
@@ -807,7 +814,47 @@ class Atoms:
             self.loadFromAbinitDensity(filename)
         elif filetype == "elk":
             self.loadFromElk(filename)
+        elif filetype == "NetCDF":
+            self.loadFromNetCDF(filename)
+        else:
+          print "(esc_lib.Atoms.__init__) ERROR: File type %s not handled at present." % filetype
+          return None
             
+    def loadFromNetCDF(self, filename):
+      """ atoms = Atoms.loadFromNetCDF(filename)
+      
+      Internal, inits an Atoms object from an Abinit NetCDF output.
+      
+      Note that we are *expecting* something like a _HIST file with limited
+      variables. At minimum, we need to have xcart, natom and rprimd in the
+      output. The _OUT.nc files do not have xcart at present (Abinit 6.12.1).
+      
+      Also note that since the _HIST file doesn't contain typat/znucl variables,
+      we just set everything to carbon by default.
+      
+      """
+      
+      self.is_crystal = True # Always for Abinit
+      self.lattice = []
+      self.positions = []
+      self.forces = []
+      self.species = []
+      self.densities = []
+      
+      f = NetCDF.NetCDFFile(filename, 'r')
+
+      self.nsteps = int(f.variables['mdtime'].getValue()[0])      
+      xcart = f.variables['xcart'].getValue()
+      rprimd = f.variables['rprimd'].getValue()
+      fcart = f.variables['fcart'].getValue()
+      natom = f.dimensions['natom']
+      
+      for i in range(self.nsteps):
+        self.lattice.append(rprimd[i])
+        self.positions.append([xc for xc in xcart[i]])
+        self.forces.append([fc for fc in fcart[i]])
+        self.species.append(natom * [6])
+         
     def loadFromElk(self, filename):
         """ atoms= Atoms.loadFromElk(filename)
         
