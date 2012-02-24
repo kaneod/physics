@@ -33,11 +33,12 @@
 from __future__ import division
 from sys import exit
 from specs_utils import check_xy, header_xy, read_xy
-from pylab import plot, ion, figure, subplot, title
+from pylab import plot, ion, figure, subplot, title, xlim, clf
 from math import ceil
 from scipy.interpolate import interp1d
 
 import Tkinter, tkFileDialog
+import csv
 #import argparse
 
 ## Need to parse some optional arguments
@@ -47,20 +48,24 @@ import Tkinter, tkFileDialog
 print "Welcome to NEXAFS!"
 print ""
 
-def plot_hemi(filename):
+def plot_dsets(fig, filename, channel=0):
 
   group = read_xy(filename)
-  ion()
-  figure()
-  for i, g in enumerate(group):
-    subplot(int(ceil(len(group) / 2)), 2, i+1)
-    plot(g[0][:,0], g[0][:,1])
+  figure(fig.number)
+  clf()
+  if len(group) == 1:
+    plot(group[0][channel][:,0], group[0][channel][:,1])
+  else:
+    for i, g in enumerate(group):
+      subplot(int(ceil(len(group) / 2)), 2, i+1)
+      plot(g[channel][:,0], g[channel][:,1])
+  
   return
 
-def main_menu(prompt="Please enter the name of the file you wish to process"):
+def main_menu(fig, prompt="Please enter the name of the file you wish to process",channel=0):
   
   print prompt
-  main_file = tkFileDialog.askopenfilename(parent=root, title="Choose an XY file")
+  main_file = tkFileDialog.askopenfilename(title="Choose an XY file")
   print "\nThankyou. Opening file %s..." % main_file
   print ""
 
@@ -90,7 +95,7 @@ def main_menu(prompt="Please enter the name of the file you wish to process"):
     elif region == "n":
       return main_menu()
     elif region == "p":
-      plot_hemi(main_file)
+      plot_dsets(fig, main_file,channel)
     else:
       try:
         region = int(region)
@@ -101,72 +106,171 @@ def main_menu(prompt="Please enter the name of the file you wish to process"):
       except ValueError:
         print "(nexafs.main_menu) ERROR: Unrecognized option '%s'." % region
 
-root = Tkinter.Tk()
-main_file, region = main_menu()
-print "Processing region %d. Do you wish to carbon-normalize? (y/n)" % region
-c_norm = raw_input("input> ").lower()
-if c_norm == "y" or c_norm == "yes":
-  norm_file, norm_region = main_menu("Please select a file to normalize against.")
-  print "Using region %d of %s for normalization." % (norm_region, norm_file)
-  c_norm = True
-else:
-  print "Not normalizing for carbon."
-  c_norm = False
+def offset_menu(fig, E, I, prompt="Enter the energy range for the pre-edge:"):
+  
+  print prompt
+  start, end = [float(x) for x in raw_input("input> ").split()]
+  
+  figure(fig.number)
+  clf()
+  subplot(111)
+  plot(E,I)
+  xlim([start, end])
+  
+  print "Enter the value you wish to use for normalization."
+  return float(raw_input("input> "))
+  
+  
+def main():
+  
+  #root = Tkinter.Tk()
+  ion()
+  main_fig = figure()
+  
+  # Get the file and region to process
+  main_file, region = main_menu(main_fig)
+  
+  m = read_xy(main_file)[region]
+  E = m[0][:,0]
+  mI = m[0][:,1]
+  mI0 = m[3][:,1]
+  mIx = [x/y for x,y in zip(mI, mI0)]
+  
+  figure(main_fig.number)
+  clf()
+  main_fig.canvas.set_window_title("Raw")
+  subplot(311)
+  plot(E,mI)
+  title("Raw hemi intensity")
+  subplot(312)
+  plot(E,mI0)
+  title("I(0)")
+  subplot(313)
+  plot(E,mIx)
+  title("Normalized by I(0)")
 
-# Generate interpolators for our selected region(s)
-ion()
-m = read_xy(main_file)[region]
-E = m[0][:,0]
-mI = interp1d(m[0][:,0], m[0][:,1])
-mI0 = interp1d(m[3][:,0],m[3][:,1])
-mIx = interp1d(E, [mI(x)/mI0(x) for x in E])
-if c_norm:
-  n = read_xy(norm_file)[norm_region]
-  nI = interp1d(n[2][:,0], n[2][:,1])
-  nI0 = interp1d(n[3][:,0], n[3][:,1])
-  nIx = interp1d(E, [nI(x)/nI0(x) for x in E])
-  mIt = interp1d(E, [mIx(x)/nIx(x) for x in E])
+  # Deal with carbon normalization
+  print "Processing region %d. Do you wish to carbon-normalize? (y/n)" % region
+  c_norm = raw_input("input> ").lower()
+  if c_norm == "y" or c_norm == "yes":
+    norm_file, norm_region = main_menu(main_fig, "Please select a file to normalize against.",channel=2)
+    print "Using region %d of %s for normalization." % (norm_region, norm_file)
+    c_norm = True
+    n = read_xy(norm_file)[norm_region]
+    nI = interp1d(n[2][:,0], n[2][:,1])
+    nI0 = interp1d(n[3][:,0], n[3][:,1])
+    nIx = [nI(x)/nI0(x) for x in E]
+    I = [x/y for x,y in zip(mIx, nIx)]
+    
+    figure(main_fig.number)
+    clf()
+    main_fig.canvas.set_window_title("Carbon normalization")
+    subplot(221)
+    plot(E,mI)
+    title("Raw hemi intensity")
+    subplot(222)
+    plot(E,mIx)
+    title("Normalized by I(0)")
+    subplot(223)
+    plot(E,nIx)
+    title("Carbon I/I(0)")
+    subplot(224)
+    plot(E, I)
+    title("Normalized by carbon.")
+  else:
+    print "Not normalizing for carbon."
+    c_norm = False
+    I = mIx
+    
+    
+  # Pre-edge offset shift.
+  offset = offset_menu(main_fig, E, I)
+  Ioff = [y - offset for y in I]
+  
+  figure(main_fig.number)
+  clf()
+  main_fig.canvas.set_window_title("Pre-edge offset")
+  subplot(221)
+  plot(E,mI)
+  title("Raw hemi intensity")
+  subplot(222)
+  plot(E,mI0)
+  title("I(0)")
+  subplot(223)
+  plot(E,I)
+  title("Spectrum-normalized")
+  subplot(224)
+  plot(E, Ioff)
+  title("Subtracted %f" % offset)
+  
+  # Post-edge offset scale
+  scale = offset_menu(main_fig, E, Ioff, prompt="Enter the energy range for the post-edge")
+  Iscale = [y/scale for y in Ioff]
+  
+  figure(main_fig.number)
+  clf()
+  main_fig.canvas.set_window_title("Final")
+  subplot(111)
+  plot(E, Iscale)
+  
+  # Output
+  print "Do you wish to output the data? (y/n)"
+  out = raw_input("input> ").lower()
+  if (out == "y") or (out == "yes"):
+    print "Select an output option:"
+    print "0\tTab-delimited text file, processed only."
+    print "1\tTab-delimited text file, all spectra."
+    print "2\tCSV file, processed only."
+    print "3\tCSV file, all spectra."
+    out_opt = int(raw_input("input> "))
+    out_file = tkFileDialog.asksaveasfilename(title="Save AS")
+    
+    if out_file == "":
+      print "Output cancelled: exiting..."
+    
+    if out_opt in [0,1]:
+      f = open(out_file, 'w')
+      f.write("# NEXAFS output - processed and normalized\n")
+      f.write("# Input file: %s\n" % main_file)
+    elif out_opt in [2,3]:
+      f = open(out_file, 'wb')
+      fcsv = csv.writer(f) # Excel dialect standard
+      fcsv.writerow(["NEXAFS output - processed and normalized"])
+      fcsv.writerow(["Input file: %s" % main_file])
+    if c_norm:
+      f.write("# Carbon norm file: %s\n" % norm_file)
+    if out_opt == 0:
+      f.write("# E  I(E)\n")
+      for x,y in zip(E,Iscale):
+        f.write("%f    %f\n" % (x,y))
+      f.close()
+    elif out_opt == 1:
+      if c_norm:
+        f.write("# E I(raw) I(0) Ir/I0 IAu IAu0 IAu/IAu0 Icnorm I(E)\n")
+        for e,ir,i0,iri0,iau,iau0,iauiau0, ic, ie in zip(E, mI, mI0, mIx,[nI(x) for x in E],[nI0(x) for x in E], nIx, I,Iscale):
+          f.write("%f    %f    %f    %f    %f    %f    %f    %f    %f\n" % (e,ir,i0,iri0,iau,iau0,iauiau0,ic,ie))
+      else:
+        f.write("# E I(raw) I(0) Ir/I0 I(E)\n")
+        for e, ir, i0, iri0,ie in zip(E,mI, mI0, mIx, Iscale):
+          f.write("%f    %f    %f    %f    %f\n" % (e,ir,i0,iri0,ie))
+    elif out_opt == 2:
+      fcsv.writerow(["E", "I(E)"])
+      for x,y in zip(E,Iscale):
+        fcsv.writerow([x,y])
+    elif out_opt == 3:
+      if c_norm:
+        fcsv.writerow(["E", "I(raw)", "I(0)", "Ir/I0", "IAu", "IAu0", "IAu/IAu0", "Icnorm", "I(E)"])
+        for e,ir,i0,iri0,iau,iau0,iauiau0, ic, ie in zip(E, mI, mI0, mIx,[nI(x) for x in E],[nI0(x) for x in E], nIx, I,Iscale):
+          fcsv.writerow([e, ir, i0, iri0, iau, iau0, iauiau0, ic, ie])
+      else:
+        fcsv.writerow(["E", "I(raw)", "I(0)", "Ir/I0", "I(E)"])
+        for e, ir, i0, iri0, ie in zip(E,mI, mI0, mIx, Iscale):
+          fcsv.writerow([e,ir,i0,iri0, ie])
+    f.close()
+      
+    
+  print "Press enter to quit."
+  quit = raw_input("press-enter> ") 
 
-
-# Make lots of lovely plots
-ion()
-#figure("Data from file %s" % main_file)
-figure()
-subplot(311)
-plot(E,[mI(x) for x in E])
-title("Raw hemi intensity")
-subplot(312)
-plot(E,[mI0(x) for x in E])
-title("I(0)")
-subplot(313)
-plot(E,[mIx(x) for x in E])
-title("Normalized by I(0)")
-
-#figure("Nomalization data from file %s" % norm_file)
-figure()
-subplot(311)
-plot(E,[nI(x) for x in E])
-title("Raw hemi intensity")
-subplot(312)
-plot(E,[nI0(x) for x in E])
-title("I(0)")
-subplot(313)
-plot(E,[nIx(x) for x in E])
-title("Normalized by I(0)")
-
-#figure("Carbon normalization")
-figure()
-subplot(221)
-plot(E,[mI(x) for x in E])
-title("Raw hemi intensity")
-subplot(222)
-plot(E,[mIx(x) for x in E])
-title("Normalized by I(0)")
-subplot(223)
-plot(E,[nIx(x) for x in E])
-title("Carbon I/I(0)")
-subplot(224)
-plot(E, [mIt(x) for x in E])
-title("Normalized by carbon.")
-print "Press enter to quit."
-quit = raw_input("press-enter> ") 
+if __name__ == "__main__":
+  main()
