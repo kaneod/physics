@@ -37,6 +37,9 @@ from numpy.linalg import norm
 from libabitools import io
 from Scientific.IO import NetCDF
 
+# Debugging flag - set to 1 to see debug messages.
+DEBUG=1
+
 # Element dictionaries
 
 elements = { 1 : "H", 2 : "He", 3 : "Li",  6 : "C", 7 : "N" , 8 : "O"}
@@ -527,6 +530,7 @@ def write_xsf(filename, positions, species, lattice=None, letter_spec=True):
     
     """
     
+    if DEBUG: print len(positions)
     # Convert everything back to angstroms for XSF
     apos = bohr2ang(positions)
     if lattice is not None:
@@ -843,7 +847,8 @@ class Atoms:
       
       f = NetCDF.NetCDFFile(filename, 'r')
 
-      self.nsteps = int(f.variables['mdtime'].getValue()[0])      
+      self.nsteps = len(f.variables['mdtime'].getValue())
+      if DEBUG: print self.nsteps, f.variables['mdtime'].getValue()   
       xcart = f.variables['xcart'].getValue()
       rprimd = f.variables['rprimd'].getValue()
       fcart = f.variables['fcart'].getValue()
