@@ -802,6 +802,8 @@ class Atoms:
         
         "abinit" : Abinit input file.
         
+        "abi_density" : Abinit _DEN file.
+        
         "elk" : Elk input file.
         
         "NetCDF" : Abinit NetCDF output. Note: this importer is not very clever
