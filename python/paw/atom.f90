@@ -14,19 +14,21 @@ module atom
   double precision  :: rmax, delta, rp
   double precision, allocatable, dimension(:) :: grid
   
-  
+  ! parameters
+  double precision, parameter :: REALLY_BIG=1.0d6
+  double precision, parameter :: REALLY_SMALL=1.0d-10
   
   contains
   
-  subroutine init(nuclear_charge_in, charge, num_states_in, grid_size_in, rmax_in, delta_in)
+  subroutine init(nuclear_charge_in, charge, num_extra_states, grid_size_in, rmax_in, delta_in)
   
-    integer :: i, j, n, l, m, num_states_in, grid_size_in
+    integer :: i, j, n, l, m, num_extra_states, grid_size_in
     double precision :: nuclear_charge_in, charge, electrons_remaining, rmax_in, delta_in
     
     ! Use inputs
-    num_states = num_states_in
     nuclear_charge = nuclear_charge_in
     num_electrons = nuclear_charge - charge
+    num_states = ceiling(num_electrons / 2) + num_extra_states
     grid_size = grid_size_in
     rmax = rmax_in
     delta = delta_in
@@ -41,30 +43,31 @@ module atom
     ! Quantum numbers
     n = 1
     l = 0
-    m = 0
-    if (.not. allocated(quantum_numbers)) allocate(quantum_numbers(num_states,3))
+    !m = 0 ! We aren't dealing with m-numbers in this code yet.
+    if (.not. allocated(quantum_numbers)) allocate(quantum_numbers(num_states,2))
     do i=1,num_states
       quantum_numbers(i,1) = n
       quantum_numbers(i,2) = l
-      quantum_numbers(i,3) = m
-      if (l .eq. n - 1) then
-        ! We have reached the maximum of the l-cycle: increment n.
-        n = n + 1
-        l = 0
-        m = 0
-      else if (m .eq. l) then 
-        ! We have reached the maximum of the m-cycle: increment l.
-        l = l + 1
-        m = -l
-      else
-        ! Increment m.
-        m = m + 1
-      end if
+      !quantum_numbers(i,3) = m
+      !if (m .eq. l) then
+        if (l .eq. n - 1) then
+          n = n + 1
+          l = 0
+          !m = 0
+        else
+          l = l + 1
+          !m = -l
+        end if
+      !else
+      !  m = m + 1
+      !end if
     end do  
     
     ! Allocate and guess eigenvalues and occupancies.
-    if (.not. allocated(eigenvalues)) allocate(eigenvalues(num_states))
-    if (.not. allocated(occupancies)) allocate(occupancies(num_states))    
+    if (allocated(eigenvalues)) deallocate(eigenvalues)
+    allocate(eigenvalues(num_states))
+    if (allocated(occupancies)) deallocate(occupancies)
+    allocate(occupancies(num_states))    
     electrons_remaining = num_electrons
     do i=1,num_states
       eigenvalues(i) = -0.5d0 * nuclear_charge ** 2 / quantum_numbers(i,1) ** 2
@@ -78,23 +81,69 @@ module atom
     end do
     
     ! Allocate F and state vectors
-    if (.not. allocated(F)) allocate(F(num_states, grid_size))
-    if (.not. allocated(v)) allocate(v(num_states, grid_size))
-    if (.not. allocated(u)) allocate(u(num_states, grid_size))
+    if (allocated(F)) deallocate(F)
+    allocate(F(num_states, grid_size))
+    if (allocated(v)) deallocate(v)
+    allocate(v(num_states, grid_size))
+    if (allocated(u)) deallocate(u)
+    allocate(u(num_states, grid_size))
     
     do i=1,num_states
       do j=1,grid_size
-        F(i,j) = numerov_f(quantum_numbers(i,2), grid(j), eigenvalues(i))
+        F(i,j) = (rp ** 2) * (delta ** 2) * exp(2 * j * delta) * &
+        & numerov_f(quantum_numbers(i,2), grid(j), eigenvalues(i)) +  &
+        & 0.25d0 * (delta ** 2)
       end do
     end do
   
   end subroutine
+  
+  subroutine numerov(state_index, direction)
+  
+    integer :: j, state_index
+    character(len=8) :: direction
+    double precision, allocatable, dimension(:) :: A, B, C
+    
+    allocate(A(grid_size))
+    allocate(B(grid_size))
+    allocate(C(grid_size))
+    
+    do j=1,grid_size
+      A(j) = 2.0d0 + (5.0d0 / 6.0d0) * F(state_index, j)
+      B(j) = 1.0d0 - (1.0d0 / 12.0d0) * F(state_index, j)
+      C(j) = 1.0d0 / B(j)
+    end do
+    
+    select case(trim(direction))
+    case('forward')
+      v(state_index,1) = 0.0d0
+      v(state_index,2) = 1.0d0
+      do j=1,(grid_size-2)
+        v(state_index,j+2) = (v(state_index,j+1) * A(j+1) - v(state_index,j) * B(j)) * C(j+2)
+      end do
+    case('backward')
+      v(state_index, grid_size) = 0.0d0
+      v(state_index, grid_size-1) = 1.0d0
+      do j=grid_size,3,-1
+        v(state_index,j-2) = (v(state_index,j-1) * A(j-1) - v(state_index,j) * B(j)) * C(j-2)
+      end do
+    end select
+    
+    do j=1,grid_size
+      u(state_index,j) = v(state_index,j) * exp(j * delta)
+    end do
+    
+    deallocate(A)
+    deallocate(B)
+    deallocate(C)
+  
+  end subroutine  
       
   double precision function numerov_f(l, r, E)
 
     integer, intent(in) :: l
     double precision, intent(in) :: r, E
-    double precision :: potential
+    !double precision :: potential
     
     numerov_f = 2.0d0 * potential(r) + l * (l + 1) / (r ** 2) - 2.0d0 * E
   
