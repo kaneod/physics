@@ -137,7 +137,41 @@ module atom
     deallocate(B)
     deallocate(C)
   
-  end subroutine  
+  end subroutine
+  
+  subroutine numerov2(state_index, direction)
+  
+    integer :: j, state_index
+    character(len=8) :: direction
+    
+    select case(trim(direction))
+    case('forward')
+      v(state_index,1) = 0.0d0
+      v(state_index,2) = 1.0d0
+      q0 = v(state_index,
+      do j=2,grid_size
+        q2 = F(state_index, j-1) * v(state_index, j-1) + 2.0d0 * q1 - q0
+        q0 = q1
+        q1 = q2
+        v(state_index, j) = q1 / (1.0d0 - F(state_index, j))
+      end do
+    case('backward')
+      v(state_index, grid_size) = 0.0d0
+      v(state_index, grid_size-1) = 1.0d0
+      do j=grid_size,3,-1
+        v(state_index,j-2) = (v(state_index,j-1) * A(j-1) - v(state_index,j) * B(j)) * C(j-2)
+      end do
+    end select
+    
+    do j=1,grid_size
+      u(state_index,j) = v(state_index,j) * exp(j * delta)
+    end do
+    
+    deallocate(A)
+    deallocate(B)
+    deallocate(C)
+  
+  end subroutine   
       
   double precision function numerov_f(l, r, E)
 
