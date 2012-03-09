@@ -221,7 +221,61 @@ def remove_comments(lines, comment_delim="#",just_blanks=False):
           stripped.append(line.partition(comment_delim)[0].strip())
     
     return stripped
+
+def elk_parse_bands(filename):
+  """ path, bands = elk_parse_bands(filename="BAND.OUT")
+  
+  Reads in the BAND.OUT file from Elk (can optionally pass
+  a different filename) and returns as an array. The first
+  array column is the path parameter and the subsequent columns
+  are the eigenvalues.
+  
+  """
+  
+  f = open(filename, 'r')
+  lines = f.readlines()
+  f.close()
+  
+  sets = []
+  curset = []
+  curpath = []
+  have_path = False
+  for line in lines:
+    bits = line.split()
+    if len(bits) != 2:
+      if have_path:
+        sets.append(curset)
+      else:
+        sets.append(curpath)
+        sets.append(curset)
+        have_path=True
+      curset = []
+      curpath = []
+    else:
+      curpath.append(float(bits[0]))
+      curset.append(float(bits[1]))
+  
+  return array(sets).T
+  
+def elk_write_bands(outfile="elk-bands.xy", infile="BAND.OUT"):
+  """ result = elk_write_bands(outfile="elk-bands.xy", infile="BAND.OUT")
+  
+  Reads in the BAND.OUT file (another filename can optionally be specified
+  in infile) and writes to a multi-column, tab-delimited xy file for plotting.
+  
+  """
+  
+  data = elk_parse_bands(infile)
+  
+  f = open(outfile, 'w')
+  
+  for i in range(data.shape[0]):
+    f.write("\t".join([str(x) for x in data[i,:]]) + "\n")
     
+  f.close()
+  
+  return True
+      
 def abinit_parse(istr):
     """ result = abinit_parse(istr)
     
