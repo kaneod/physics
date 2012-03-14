@@ -3,10 +3,12 @@ module atom
 
   implicit none
   
+  double precision, parameter :: pi = 3.141592653589793
+  
   double precision  :: nuclear_charge, num_electrons
   integer           :: num_states
   double precision, allocatable, dimension(:) :: eigenvalues, occupancies, &
-  & density
+  & density, hartree
   double precision, allocatable, dimension(:,:) :: F, v, u
   integer, allocatable, dimension(:,:)           :: quantum_numbers
   
@@ -96,18 +98,20 @@ module atom
         u(i,j) = 0.0d0
         v(i,j) = 0.0d0
         F(i,j) = (rp ** 2) * (delta ** 2) * exp(2 * j * delta) * &
-        & numerov_f(quantum_numbers(i,2), grid(j), eigenvalues(i)) +  &
+        & schrod_f(quantum_numbers(i,2), grid(j), eigenvalues(i)) +  &
         & 0.25d0 * (delta ** 2)
       end do
     end do
     
     ! Generate the initial states
     do i=1,num_states
-      call numerov(i,"backwards")
+      call numerov_schrod(i,"backwards")
     end do
     
     ! Generate the initial density
     call compute_density
+    
+    
   
   end subroutine
   
@@ -130,36 +134,100 @@ module atom
     end do
     
   end subroutine
+  
+  subroutine integrate_poisson
+  
+    integer :: j, k
+    double precision :: integrand(grid_size)
+    
+    if (allocated(hartree)) deallocate(hartree)
+    allocate(hartree(grid_size))
+    
+    do j=1,grid_size
+      do k=1,grid_size
+        if (j .ne. k) then
+          integrand(k) = density(k) / abs(grid(j) - grid(k))
+        else
+          ! Eliminate the infinite interactions by brute force
+          integrand(k) = 0.0d0
+        end if
+      end do
+      
+      hartree(j) = 4.0d0 * pi * integrate(grid, integrand, grid_size)
+    
+    end do
+    
+  end subroutine
     
   
-  subroutine numerov(state_index, direction)
+  subroutine verlet_poisson
+  
+    integer :: j
+    double precision :: v2, alpha, h0
+    
+    if (allocated(hartree)) deallocate(hartree)
+    allocate(hartree(grid_size))
+    
+    ! Boundary conditions are U(0) = 0, U(rmax) = num_electrons. 
+    ! Can't set the second initially so we guess U(1) = 1 and scale later.
+    
+    h0 = 0.0d0
+    hartree(1) = 1.0d0
+    
+    do j=2,grid_size
+      v2 = -1.0d0 * rp * (delta ** 2) * exp(1.5d0 * (j - 1) * delta) * &
+      & density(j-1) / (exp((j - 1) * delta) - 1.0d0) + 0.25d0 * (delta ** 2) &
+      & * hartree(j-1)
+      hartree(j) = 2.0d0 * hartree(j-1) - h0 + v2
+      h0 = hartree(j-1)
+    end do
+    
+    ! Rescale back to r coordinates
+    do j=1,grid_size
+      hartree(j) = hartree(j) * exp(0.5d0 * j * delta)
+    end do
+    
+    ! Now sort out boundary conditions
+    
+    alpha = (num_electrons - hartree(grid_size)) / rmax
+    
+    do j=1,grid_size
+      hartree(j) = hartree(j) + alpha * grid(j)
+    end do
+    
+  end subroutine
+  
+  subroutine numerov_schrod(state_index, direction)
   
     integer :: j, state_index
     character(len=8) :: direction
     double precision :: q0, q1, q2, unorm
+    double precision :: u2(grid_size)
     
     select case(trim(direction))
     case('forward')
-      v(state_index,1) = 0.0d0
-      v(state_index,2) = 1.0d0
-      q0 = v(state_index,1) * (1.0d0 - F(state_index,1) / 12.0d0)
-      q1 = v(state_index,2) * (1.0d0 - F(state_index,2) / 12.0d0)
+      v(state_index,1) = grid(1) * exp(-0.5d0 * delta)
+      v(state_index,2) = grid(2) * exp(-1.0d0 * delta)
+      q0 = 0
+      q1 = v(state_index,1) * (1.0d0 - F(state_index,1) / 12.0d0)
       do j=2,grid_size
-        q2 = F(state_index, j-1) * v(state_index, j-1) + 2.0d0 * q1 - q0
+        q2 = F(state_index,j-1) * v(state_index,j-1) + 2.0d0 * q1 - q0
         q0 = q1
         q1 = q2
         v(state_index, j) = q1 / (1.0d0 - F(state_index, j))
       end do
     case('backward')
-      v(state_index,grid_size) = exp(-1.0d0 * sqrt(-2.0d0 * & 
-      & eigenvalues(state_index)) * grid(grid_size))
+      v(state_index,grid_size) = exp(-1.0d0 * sqrt(-2.0d0 * &
+      & eigenvalues(state_index)) * grid(grid_size)) * exp(-0.5d0 * & 
+      & grid_size * delta)
       v(state_index,grid_size-1) = exp(-1.0d0 * sqrt(-2.0d0 * &
-      & eigenvalues(state_index)) * grid(grid_size-1))
+      & eigenvalues(state_index)) * grid(grid_size-1)) * exp(-0.5d0 * & 
+      & grid_size * delta)
       q0 = v(state_index,grid_size) * (1.0d0 - F(state_index,grid_size) / &
       & 12.0d0)
       q1 = v(state_index,grid_size-1) * (1.0d0 - F(state_index,grid_size-1) / &
       & 12.0d0)
-      do j=grid_size-2,2,-1
+      do j=grid_size-2,1,-1
         q2 = F(state_index,j+1) * v(state_index,j+1) + 2.0d0 * q1 - q0
         q0 = q1
         q1 = q2
@@ -167,23 +235,30 @@ module atom
       end do
     end select
     
+    ! Conversion from j-space to r-space.
+    
     do j=1,grid_size
-      u(state_index,j) = v(state_index,j) * exp(j * delta)
+      u(state_index,j) = v(state_index,j) * exp(0.5d0 * j * delta)
     end do
     
-    unorm = integrate(grid, u(state_index), grid_size)
-    print *, unorm
-    u(state_index) = u(state_index) / unorm
+    ! Normalization
+    
+    do j=1,grid_size
+      u2(j) = u(state_index,j) * u(state_index,j)
+    end do
+    
+    unorm = integrate(grid, u2, grid_size)
+    u(state_index, 1:grid_size) = u(state_index, 1:grid_size) / sqrt(unorm)
   
   end subroutine   
       
-  double precision function numerov_f(l, r, E)
+  double precision function schrod_f(l, r, E)
 
     integer, intent(in) :: l
     double precision, intent(in) :: r, E
     !double precision :: potential
     
-    numerov_f = 2.0d0 * potential(r) + l * (l + 1) / (r ** 2) - 2.0d0 * E
+    schrod_f = 2.0d0 * potential(r) + l * (l + 1) / (r ** 2) - 2.0d0 * E
   
   end function
   
@@ -200,15 +275,12 @@ module atom
     
     integer :: n, j
     double precision :: x(n), y(n)
-    double precision :: psum = 0.0d0
+    
+    integrate = 0.0d0
       
     do j=1,n-1
-      psum = psum + 0.5 * (x(j+1) - x(j)) * (y(j+1) + y(j))
+      integrate = integrate + 0.5 * (x(j+1) - x(j)) * (y(j+1) + y(j))
     end do
-    
-    integrate = psum
-    
-    return
     
   end function
   
