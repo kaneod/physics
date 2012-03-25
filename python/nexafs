@@ -50,15 +50,25 @@ print ""
 
 def plot_dsets(fig, filename, channel=0):
 
+  # Note: Sometimes XY data doesn't have multiple channels - we test for this,
+  # and if there isn't the specified channel for a given set we just plot
+  # channel 0. This allows for mixed XPS and NEXAFS datasets.
+  
   group = read_xy(filename)
   figure(fig.number)
   clf()
   if len(group) == 1:
-    plot(group[0][channel][:,0], group[0][channel][:,1])
+    if len(group[0]) <= channel:
+      plot(group[0][0][:,0], group[0][0][:,1])
+    else:
+      plot(group[0][channel][:,0], group[0][channel][:,1])
   else:
     for i, g in enumerate(group):
       subplot(int(ceil(len(group) / 2)), 2, i+1)
-      plot(g[channel][:,0], g[channel][:,1])
+      if len(g) <= channel:
+        plot(g[0][:,0], g[0][:,1])
+      else:
+        plot(g[channel][:,0], g[channel][:,1])
   
   return
 
@@ -157,7 +167,7 @@ def main():
     print "Using region %d of %s for normalization." % (norm_region, norm_file)
     c_norm = True
     n = read_xy(norm_file)[norm_region]
-    nI = interp1d(n[2][:,0], n[2][:,1])
+    nI = interp1d(n[2][:,0], n[2][:,1]) # This line will fail if the extended channels are not present!
     nI0 = interp1d(n[3][:,0], n[3][:,1])
     nIx = [nI(x)/nI0(x) for x in E]
     I = [x/y for x,y in zip(mIx, nIx)]

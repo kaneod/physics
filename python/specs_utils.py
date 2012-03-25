@@ -152,31 +152,43 @@ def check_xy(filename):
     print "(specs_utils.check_xy) ERROR: File %s could not be opened for reading." % filename
     return False
 
-def header_xy(filename):
-  """ group_name, region_names, all_comments = specs_utils.header_xy(filename)
+def header_xy(filename, separate_regions=False):
+  """ group_name, region_names, all_comments = specs_utils.header_xy(filename, separate_regions=False)
   
   Returns the group and region labels for a given XY file, plus all lines
   that start with comments for post-processing.
+  
+  If separate_regions is True, the regions list is separated into individual lists for each group.
   
   """
   
   if check_xy(filename):
     f = open(filename, 'r')
   
-  group_name = "None"
+  group_names = []
   comments = []
   region_names = []
+  cur_regions = []
   for line in f:
     if line.startswith("#"):
       comments.append(line)
     if "Group:" in line:
-      group_name = line.partition("Group:")[2].strip()
+      group_names.append(line.partition("Group:")[2].strip())
+      if separate_regions:
+        region_names.append(cur_regions)
+        cur_regions = []
     if "Region:" in line:
-      region_names.append(line.partition("Region:")[2].strip())
+      cur_regions.append(line.partition("Region:")[2].strip())
   
+  # Hack!
+  if separate_regions:
+    region_names.append(cur_regions)
+    region_names = region_names[1:]
+  else:
+    region_names = cur_regions
   f.close()
   
-  return group_name, region_names, comments
+  return group_names, region_names, comments
      
     
 def make_interps(filename, columnx=0, columny=1, kind='linear'):
