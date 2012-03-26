@@ -244,6 +244,45 @@ def read_xy(filename, comment_delim="#"):
       
   return data
   
+def read_seq_xy(filename, comment_delim="#"):
+  """ data = read_seq_xy(filename, comment_delim="#")
+  
+  Reads xy files where the individual data sets are listed in two columns
+  sequentially. We assume (but don't check) that all the sets are the same
+  size. The returned data has the form:
+  
+  data[i,j,k]
+  
+  where i runs over the sets, j runs over the points and k runs over the 
+  columns of data, so 0 is the x axis, 1 is the y1 axis etc.
+  
+  Note that we can accommodate blank lines separating the sets.
+  
+  """
+  
+  f = open(filename, 'r')
+  lines = f.readlines()
+  f.close()
+  
+  header_lines = []
+  cur_block = []
+  data_blocks = []
+  
+  for i in range(len(lines)):
+    try:
+      x = float(lines[i].split()[0])
+      cur_block.append([float(y) for y in lines[i].split()])
+    except ValueError:
+      if cur_block != []:
+        data_blocks.append(cur_block)
+        cur_block = []
+      header_lines.append(lines[i])
+      
+  if cur_block != []:
+    data_blocks.append(cur_block)
+      
+  return array(data_blocks)
+  
 def read_ACF(filename):
   """ charges, total_charge = read_ACF(filename)
   
