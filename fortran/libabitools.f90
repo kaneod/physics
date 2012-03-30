@@ -45,6 +45,7 @@ module io
   
   !integer, parameter :: dp = selected_real_kind(15)
   integer, parameter :: dp = 8 ! see note 2
+  integer, parameter :: DEBUG = 1 ! Set to 1 and recompile to echo outputs.
     
   !private ! Would like private but f2py can't handle it yet.
   
@@ -78,6 +79,12 @@ module io
   
   ! Density variables
   real(kind=dp), allocatable, dimension(:) :: rhor
+  
+  ! Wavefunction variables
+  real(kind=dp), allocatable, dimension(:) :: cg, eigen
+  real(kind=dp), allocatable, dimension(:,:) :: kg
+  integer :: npw
+  
     
     
   contains
@@ -114,9 +121,16 @@ module io
     if (allocated(tnons)) deallocate(tnons)
     if (allocated(xred)) deallocate(xred)
     if (allocated(title)) deallocate(title)
+    if (allocated(eigen)) deallocate(eigen)
+    if (allocated(cg)) deallocate(cg)
     
     ! Density
     if (allocated(rhor)) deallocate(rhor)
+    
+    ! Wavefunction
+    if (allocated(eigen)) deallocate(eigen)
+    if (allocated(cg)) deallocate(cg)
+    if (allocated(kg)) deallocate(kg)
     
   end subroutine
     
@@ -153,12 +167,28 @@ module io
     
     read(funit) codvsn, headform, fform
     
+    if (DEBUG .eq. 1) then
+      print *, "codvsn, headform, fform"
+      print *, codvsn, headform, fform
+    end if
+    
     ! Read basic variables
     
     read(funit) bantot, date, intxc, ixc, natom, ngfft(:), nkpt, nspden, &
     &           nspinor, nsppol, nsym, npsp, ntypat, occopt, pertcase, usepaw, &
     &           ecut, ecutdg, ecutsm, ecut_eff, qptn(:), rprimd(:,:), stmbias, &
     &           tphysel, tsmear, usewvl
+    
+    if (DEBUG .eq. 1) then
+      print *, "bantot, date, intxc, ixc, natom, ngfft(1:3), nkpt, nspden"
+      print *, bantot, date, intxc, ixc, natom, ngfft(1:3), nkpt, nspden
+      print *, "nspinor, nsppol, nsym, npsp, ntypat, occopt, pertcase, usepaw"
+      print *, nspinor, nsppol, nsym, npsp, ntypat, occopt, pertcase, usepaw
+      print *, "ecut, ecutdg, ecutsm, ecut_eff, qptn(1:3), rprimd(1:3,1:3)"
+      print *, ecut, ecutdg, ecutsm, ecut_eff, qptn(1:3), rprimd(1:3,1:3)
+      print *, "stmbias, tphysel, tsmear, usewvl"
+      print *, stmbias, tphysel, tsmear, usewvl
+    end if
     
     ! We can now allocate our variables
     
@@ -252,6 +282,77 @@ module io
   
   end subroutine
   
+  subroutine read_wavefunction(funit)
+  
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !
+    ! read_wavefunction(funit)
+    !
+    ! Internal: reads wavefunction coefficients cg and eigenvalues eigen from
+    ! an already-opened WFK file.
+    !
+    ! Input variables:
+    !
+    ! fnit: file unit number for the WFK file.
+    !
+    ! Notes:
+    !
+    ! 1. cg is single dimensional and runs by band first, then kpt, then spin.
+    ! 
+    ! 2. eigen is also also 1D and runs by band, kpt, spin.
+    !
+    ! 3. Strictly speaking nband can vary as a function of kpt. However,
+    ! in order to be able to allocate cg, we have to assume it is constant. We
+    ! use the separate variable nbandk for this constant value.
+    !
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    
+    integer, intent(in) :: funit
+    integer :: isppol, ikpt, ibantot, iband, ii, i, nbandk
+    
+    
+    ! Have to start the loop before allocating because npw is actually in
+    ! the file.
+    
+    ibantot = 0
+    i = 0
+    do isppol=1,nsppol
+      if (DEBUG .eq. 1) then
+        print *, "isppol = ", isppol
+      end if
+      do ikpt=1,nkpt
+        if (DEBUG .eq. 1) then
+          print *, "ikpt = ", ikpt
+        end if
+        read(funit) npw, nspinor, nbandk
+        if (DEBUG .eq. 1) then
+          print *, "npw, nspinor, nbandk"
+          print *, npw, nspinor, nbandk
+        end if
+        if (.not. allocated(kg)) allocate(kg(3,npw))
+        read(funit) kg(1:3,1:npw)
+        if (DEBUG .eq. 1) then
+          print *, "kg(1:3, 1:npw)"
+          print *, kg(1:3, 1:npw)
+        end if
+        read(funit) eigen(1+ibantot:nbandk+ibantot), &
+        & occ(1+ibantot:nbandk+ibantot)
+        if (DEBUG .eq. 1) then
+          print *, "eigen(1+ibantot:nbandk+ibantot), occ(1+ibandtot:etc)"
+          print *, eigen(1+ibantot:nbandk+ibantot), & 
+          & occ(1+ibantot:nbandk+ibantot)
+        end if
+        if (.not. allocated(cg)) allocate(cg(2 * npw * nspinor * nbandk))
+        do iband=1,nbandk
+          read(funit) (cg(ii+i), ii=1,2*npw*nspinor)
+        end do
+        ibantot = ibantot + nbandk
+        i = i + 2 * npw * nspinor * nbandk
+      end do
+    end do
+    
+  end subroutine
+  
   subroutine header(filename)
   
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -298,6 +399,30 @@ module io
     open(unit=100, file=filename, status='old', form='unformatted')
     call read_header(100)
     call read_density(100)
+    close(100)
+    
+  end subroutine
+  
+  subroutine wavefunction(filename)
+  
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !
+    ! wavefunction(filename)
+    ! 
+    ! For external access: opens, reads and closes an abinit _WFK file.
+    !
+    ! Input variables:
+    !
+    ! filename: Path to the file you want to open.
+    !
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    
+    character(len=132), intent(in) :: filename
+    
+    call deallocate_all
+    open(unit=100, file=filename, status='old', form='unformatted')
+    call read_header(100)
+    call read_wavefunction(100)
     close(100)
     
   end subroutine

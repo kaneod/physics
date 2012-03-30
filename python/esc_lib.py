@@ -1067,8 +1067,24 @@ class Atoms:
     forces = []                 # Same for forces...
     species = []                # and species.
     densities = []              # List of 3D arrays
+    wfks = []
     
     test = []                   # Test output
+    
+    def clean(self):
+      """ Atoms.clean()
+      
+      Internal - wipes out data in the instance object, DON'T USE!
+      
+      """
+      
+      self.is_crystal = True
+      self.lattce = []
+      self.positions = []
+      self.forces = []
+      self.species = []
+      self.densities = []
+      self.wfks = []
     
     def __init__(self, filename, filetype="XSF"):
         """ atoms = Atoms(filename, filetype="XSF")
@@ -1096,6 +1112,8 @@ class Atoms:
             self.loadFromAbinit(filename)
         elif filetype == "abi_density":
             self.loadFromAbinitDensity(filename)
+        elif filetype == "abi_wfk":
+            self.loadFromAbinitWFK(filename)
         elif filetype == "elk":
             self.loadFromElk(filename)
         elif filetype == "NetCDF":
@@ -1118,12 +1136,7 @@ class Atoms:
       
       """
       
-      self.is_crystal = True # Always for Abinit
-      self.lattice = []
-      self.positions = []
-      self.forces = []
-      self.species = []
-      self.densities = []
+      self.clean()
       
       f = NetCDF.NetCDFFile(filename, 'r')
 
@@ -1147,12 +1160,7 @@ class Atoms:
         
         """
         
-        self.is_crystal = True
-        self.lattice = []
-        self.positions = []
-        self.forces = []
-        self.species = []
-        self.densities = []
+        self.clean()
         
         f = open(filename, 'r')
         
@@ -1219,6 +1227,21 @@ class Atoms:
          
         self.positions.append(pos)
     
+#    def loadFromAbinitWFK(self, wfk_file):
+#      """ atoms = Atoms.loadFromAbinitWFK(dens_file)
+#      
+#      Internal, inits an Atoms object from a _WFK file written
+#      by abinit.
+##      
+#      """
+#      
+#        self.clean()
+#        
+#        # Libabitools does the work here (fortran library) because
+#        # we're potentially reading in a gigantic file.
+#        
+#        io.wavefunction(wfk_file)
+      
     def loadFromAbinitDensity(self, dens_file):
         """ atoms= Atoms.loadFromAbinitDensity(dens_file)
         
@@ -1227,12 +1250,7 @@ class Atoms:
         
         """
         
-        self.is_crystal = True
-        self.lattice = []
-        self.positions = []
-        self.forces = []
-        self.species = []
-        self.densities = []
+        self.clean()
         
         # The libabi2py fortran library does the hard work
         # here, we just need to run the density routine and
@@ -1270,11 +1288,7 @@ class Atoms:
         """
         
         # Destroy current data
-        self.is_crystal = True      # Always true for abinit
-        self.lattice = []
-        self.positions = []
-        self.forces = []
-        self.species = []
+        self.clean()
         
         f = open(abinit_input, 'r')
         lines = f.readlines()
@@ -1346,11 +1360,7 @@ class Atoms:
         """
         
         # Destroy our current data
-        self.is_crystal = False
-        self.lattice = []
-        self.positions = []
-        self.forces = []
-        self.species = []
+        self.clean()
         
         f = open(xsf_file)
         if not f:
