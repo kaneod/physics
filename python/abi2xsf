@@ -1,0 +1,50 @@
+#!/usr/bin/env python
+
+################################################################################
+#
+# abi2xsf
+#
+# Converts an abinit .in file to a XSF file for viewing with XCrysden
+#
+################################################################################
+#
+# Created Apr2012 by Kane O'Donnell (Australian Synchrotron).
+#
+################################################################################
+#
+# Copyright 2012 Kane O'Donnell
+#
+#     This library is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This library is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this library.  If not, see <http://www.gnu.org/licenses/>.
+#
+################################################################################
+# 
+# NOTES
+#
+# 1. 
+#
+#
+################################################################################
+
+import esc_lib
+import argparse
+
+parser = argparse.ArgumentParser(description="Convert an Abinit .in file to XSF.")
+
+parser.add_argument('input', help="Abinit .in input file.")
+parser.add_argument('output', help="Name of output XSF file.")
+
+args = parser.parse_args()
+
+crystal = esc_lib.Atoms(args.input, "abinit")
+crystal.writeXSF(args.output)
