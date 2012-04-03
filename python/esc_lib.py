@@ -1051,7 +1051,104 @@ class ESCError(Exception):
         self.msg = msg
         print expr
         print msg
+        
+class Atom:
+  """ Atom class: a single atom, as represented by, for example, a 
+  PAW data set.
+  
+  Create using Atom("my_atom.paw"), where the input file is the
+  abinit-formatted pseudopotential file. 
+  
+  """
+  
+  def __init__(self, pawfile):
+    """ atom = Atom(pawfile)
     
+    Creates an atom object by reading a abinit PAW dataset.
+    
+    """
+    
+    # In the interests of future-proofing, offload to an internal.
+    self.loadFromAbinit(pawfile)
+  
+  def loadFromAbinit(self, pawfile):
+    """ Atom.loadFromAbinit(pawfile)
+    
+    Internal: initializes atom data from abinit PAW file.
+    
+    """
+    
+    f = open(pawfile)
+    lines = f.readlines()
+    f.close()
+    
+    # Grab the important bits from the header
+    self.element = lines[0].split()[5]
+    self.generation = lines[0].split("-")[1].strip()
+    
+    self.zatom = float(lines[1].split()[0])
+    self.zion = float(lines[1].split()[1])
+    self.pspdat = int(lines[1].split()[2])
+    
+    self.pspcod = int(lines[2].split()[0])
+    self.pspxc = int(lines[2].split()[1])
+    self.lmax = int(lines[2].split()[2])
+    self.lloc = int(lines[2].split()[3])
+    self.mmax = int(lines[2].split()[4])
+    self.r2well = float(lines[2].split()[5])
+    
+    self.pspfmt = lines[3].split()[0]
+    self.creator = int(lines[3].split()[1])
+    
+    self.basis_size = int(lines[4].split()[0])
+    self.lmn_size = int(lines[4].split()[1])
+    
+    self.orbitals = [int(x) for x in lines[5].split()[0:self.basis_size]]
+    self.number_of_meshes = int(lines[6].split()[0])
+    
+    self.mesh_info = []
+    for i in range(self.number_of_meshes):
+      meshbits = lines[7+i].split()
+      tmpdict = {}
+      tmpdict["type"] = int(meshbits[1])
+      tmpdict["size"] = int(meshbits[2])
+      tmpdict["rad_step"] = float(meshbits[3])
+      tmpdict["log_step"] = float(meshbits[4])
+      self.mesh_info.append(tmpdict)
+      
+    self.r_cut = float(lines[7+self.number_of_meshes].split()[0])
+    self.shape_type = int(lines[8+self.number_of_meshes].split()[0])
+    self.rshape = float(lines[8+self.number_of_meshes].split()[1])
+    
+    # Now go through and grab all the bits!
+    self.data = []
+    data = lines[9+self.number_of_meshes:]
+    while (is_data):
+      # Header of the chunk specifies the length.
+      chunk = {}
+      chunk["title"] = data[0].split("=====")[1].strip()
+      chunk["comment"] = data[0].split("=====")[2].strip()
+      # There are a few special chunks that have slightly different formatting
+      if chunk["title"] == "Dij0" or chunk["title"] == "Rhoij0":
+        
+      chunk["mesh index"] = int(data[1].split()[0])
+      data = data[2:]
+      size = self.mesh_info[chunk["mesh index"] - 1]["size"]
+      chunk["data"] = []
+      got_data = False
+      while not got_data:
+        for val in [float(x) for x in data[0].split()]:
+          chunk["data"].append(val)
+        if len(chunk["data"]) == size:
+          data = data[1:]
+          got_data = True
+        else:
+          data = data[1:]
+      self.data.append(chunk)
+    
+    
+        
+        
 class Atoms:
     """ Atoms class: a collection of atoms (possibly with a crystal structure)
     
