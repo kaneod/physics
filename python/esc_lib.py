@@ -32,7 +32,7 @@
 
 
 from __future__ import division
-from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin, exp
+from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin, exp, arange
 from numpy.linalg import norm
 from libabitools import io
 from Scientific.IO import NetCDF
@@ -746,6 +746,50 @@ def chop128(in_string):
     
     return in_string
     
+def write_cube(filename, positions, species, lattice, datagrid, timestep=0):
+  """ succeeded = write_cube(filename, positions, species, lattice, datagrid, timestep=0)
+  
+  Writes a CUBE file containing the passed information. The datagrid must be a 3D array.
+  
+  We can't animate, so we must specify the timestep. By default this is the first timestep.
+  
+  """
+  pos = positions[timestep]
+  spec = species[timestep]
+  lat = lattice[timestep]
+    
+  f = open(filename, 'w')
+  # First two lines of a CUBE file are comments.
+  f.write("CUBE\n")
+  f.write("Output created by esc_lib.\n")
+  # Number of atoms then the origin of the density coordinate system.
+  f.write("%d 0.000000 0.000000 0.000000\n" % len(spec))
+  # Each of the next three lines specifies the number of grid points in an vector
+  # direction, then gives the step vector itself.
+  nx = datagrid.shape[0]
+  ny = datagrid.shape[1]
+  nz = datagrid.shape[2]
+  f.write("%d %g %g %g\n" % (nx, lat[0][0] / nx, lat[0][1] / nx, lat[0][2] / nx))
+  f.write("%d %g %g %g\n" % (ny, lat[1][0] / ny, lat[1][1] / ny, lat[1][2] / ny))
+  f.write("%d %g %g %g\n" % (nz, lat[2][0] / nz, lat[2][1] / nz, lat[2][2] / nz))
+  # Now list atomic number, charge, position (absolute) for each atom. We don't
+  # actually deal with charge here, so set to 0.
+  for p, s in zip(pos, spec):
+    f.write("%d 0.000000 %g %g %g\n" % (s, p[0], p[1], p[2]))
+    
+  for i in range(nx):
+    for j in range(ny):
+      for k in range(nz):
+        f.write("%g " % datagrid[i,j,k])
+        # Throw in a newline every now and then to keep the output readable.
+        if k % 6 == 5:
+          f.write("\n")
+      f.write("\n")
+  
+  f.close()
+  return True  
+  
+    
 def write_cube_density(filename, positions, species, lattice, densities, timestep=0):
     """ succeeded = write_cube_density(filename, positions, species, lattice, density, timestep=0)
     
@@ -759,41 +803,7 @@ def write_cube_density(filename, positions, species, lattice, densities, timeste
     
     """
     
-    pos = positions[timestep]
-    den = densities[timestep]
-    spec = species[timestep]
-    lat = lattice[timestep]
-    
-    f = open(filename, 'w')
-    # First two lines of a CUBE file are comments.
-    f.write("CUBE\n")
-    f.write("Output created by esc_lib.\n")
-    # Number of atoms then the origin of the density coordinate system.
-    f.write("%d 0.000000 0.000000 0.000000\n" % len(spec))
-    # Each of the next three lines specifies the number of grid points in an vector
-    # direction, then gives the step vector itself.
-    nx = den.shape[0]
-    ny = den.shape[1]
-    nz = den.shape[2]
-    f.write("%d %g %g %g\n" % (nx, lat[0][0] / nx, lat[0][1] / nx, lat[0][2] / nx))
-    f.write("%d %g %g %g\n" % (ny, lat[1][0] / ny, lat[1][1] / ny, lat[1][2] / ny))
-    f.write("%d %g %g %g\n" % (nz, lat[2][0] / nz, lat[2][1] / nz, lat[2][2] / nz))
-    # Now list atomic number, charge, position (absolute) for each atom. We don't
-    # actually deal with charge here, so set to 0.
-    for p, s in zip(pos, spec):
-        f.write("%d 0.000000 %g %g %g\n" % (s, p[0], p[1], p[2]))
-    
-    for i in range(nx):
-        for j in range(ny):
-            for k in range(nz):
-                f.write("%g " % den[i,j,k])
-                # Throw in a newline every now and then to keep the output readable.
-                if k % 6 == 5:
-                    f.write("\n")
-            f.write("\n")
-    
-    f.close()
-    return True
+    return write_cube(filename, positions, species, lattice, densities[timestep], timestep)
     
 def write_xsf(filename, positions, species, lattice=None, letter_spec=True):
     """ succeeded = write_xsf(filename, positions, species, lattice=None, letter_spec=True)
@@ -1107,6 +1117,7 @@ class Atom:
     self.number_of_meshes = int(lines[6].split()[0])
     
     self.mesh_info = []
+    self.mesh = []
     for i in range(self.number_of_meshes):
       meshbits = lines[7+i].split()
       tmpdict = {}
@@ -1115,6 +1126,12 @@ class Atom:
       tmpdict["rad_step"] = float(meshbits[3])
       tmpdict["log_step"] = float(meshbits[4])
       self.mesh_info.append(tmpdict)
+      j = arange(1,tmpdict["size"]+1)
+      if tmpdict["type"] == 1:
+        # Linear grid?
+        self.mesh.append(tmpdict["rad_step"] * j)
+      elif tmpdict["type"] == 2:
+        self.mesh.append(tmpdict["rad_step"] * (exp(tmpdict["log_step"] * (j - 1)) - 1))
       
     self.r_cut = float(lines[7+self.number_of_meshes].split()[0])
     self.shape_type = int(lines[8+self.number_of_meshes].split()[0])
@@ -1123,17 +1140,24 @@ class Atom:
     # Now go through and grab all the bits!
     self.data = []
     data = lines[9+self.number_of_meshes:]
+    is_data = True
     while (is_data):
       # Header of the chunk specifies the length.
       chunk = {}
       chunk["title"] = data[0].split("=====")[1].strip()
       chunk["comment"] = data[0].split("=====")[2].strip()
+      print chunk["title"]
       # There are a few special chunks that have slightly different formatting
-      if chunk["title"] == "Dij0" or chunk["title"] == "Rhoij0":
-        
-      chunk["mesh index"] = int(data[1].split()[0])
-      data = data[2:]
-      size = self.mesh_info[chunk["mesh index"] - 1]["size"]
+      if "Dij0" not in chunk["title"] and "Rhoij0" not in chunk["title"]:
+        chunk["mesh index"] = int(data[1].split()[0])
+        if "VHntZC" in chunk["title"]:
+          self.vloc_format = int(data[1].split()[1]) 
+        data = data[2:]
+        size = self.mesh_info[chunk["mesh index"] - 1]["size"]
+      else:
+        size = self.lmn_size * (self.lmn_size + 1) * 0.5
+        chunk["mesh index"] = -1
+        data = data[1:]
       chunk["data"] = []
       got_data = False
       while not got_data:
@@ -1144,7 +1168,25 @@ class Atom:
           got_data = True
         else:
           data = data[1:]
+      chunk["data"] = array(chunk["data"])
       self.data.append(chunk)
+      if len(data) == 0:
+        is_data = False
+    
+    # Expand rhoij and dij matrices into a triangular matrix.
+    for i, d in enumerate(self.data):
+      if "Rhoij0" in d['title']:
+        self.iRhoij0 = i
+      elif "Dij0" in d['title']:
+        self.iDij0 = i
+    
+    self.Dij0 = zeros((self.lmn_size, self.lmn_size))
+    self.Rhoij0 = zeros((self.lmn_size, self.lmn_size))
+    
+    for row in range(1, self.lmn_size+1):
+      for column in range(1, row+1):
+        self.Dij0[row - 1, column - 1] = self.data[self.iDij0]['data'][(row  - 1 + (row -1 )** 2) / 2 + column - 1]
+        self.Rhoij0[row - 1, column - 1] = self.data[self.iRhoij0]['data'][(row - 1 + (row - 1) ** 2) / 2 + column - 1]
     
     
         
@@ -1158,14 +1200,17 @@ class Atoms:
     
     nsteps = 1                  # > 1 if object has time-series data
                                 # (ie is animated)
-    is_crystal = False          # True if we expect to have lattice vectors
+    is_crystal = True          # True if we expect to have lattice vectors
     lattice = []                # List of lists of 3 vectors.
     positions = []              # List of lists of atomic positions.
     forces = []                 # Same for forces...
     species = []                # and species.
     densities = []              # List of 3D arrays
     wfks = []
-    
+    filehook = 0                # For *really big files* it's better to
+                                # keep a filehook and just read as necessary.
+                                # An example is any of the larger NetCDF output
+                                # files from Abinit.
     test = []                   # Test output
     
     def clean(self):
@@ -1182,6 +1227,9 @@ class Atoms:
       self.species = []
       self.densities = []
       self.wfks = []
+      if self.filehook:
+        self.filehook.close()
+        self.filehook = 0
     
     def __init__(self, filename, filetype="XSF"):
         """ atoms = Atoms(filename, filetype="XSF")
@@ -1215,9 +1263,29 @@ class Atoms:
             self.loadFromElk(filename)
         elif filetype == "NetCDF":
             self.loadFromNetCDF(filename)
+        elif filetype == "ETSF":
+            self.loadFromETSF(filename)
         else:
           print "(esc_lib.Atoms.__init__) ERROR: File type %s not handled at present." % filetype
           return None
+          
+    def loadFromETSF(self, filename):
+      """ atoms = Atoms.loadFromETSF(filename)
+      
+      Internal, inits an Atoms object from an ETSF NetCDF output. Can get this
+      from Abinit using pawprtwf, for example.
+      
+      """
+      
+      self.clean()
+      
+      f = NetCDF.NetCDFFile(filename, 'r')
+      self.positions = [[array(x) for x in f.variables['reduced_atom_positions'][:]]]
+      self.lattice = [[array(x) for x in f.variables['primitive_vectors'][:]]]
+      
+      znucl = f.variables['atomic_numbers'][:]
+      self.species = [[int(znucl[x-1]) for x in f.variables['atom_species'][:]]]
+      self.filehook = f
             
     def loadFromNetCDF(self, filename):
       """ atoms = Atoms.loadFromNetCDF(filename)
@@ -1526,6 +1594,49 @@ class Atoms:
                 self.positions.append(positions)
                 self.forces.append(forces)
                 self.species.append(species)
+                
+    def writeWaveFunctionCube(self, filename, spin,kpt,band,spinor, option="density"):
+      """ succeeded = Atoms.writeWaveFunctionCube(filename, spin, kpt, band, spinor, option="density")
+      
+      If this Atoms instance has a filehook (must point to an open and valid ETSF-formatted
+      NetCDF file object), read a wavefunction and write to a CUBE file. 
+      
+      Note we can't really deal with complex numbers in the CUBE format so have to
+      choose an option - density, mod, real or imag.
+      
+      """
+      
+      wf = self.getRealSpaceWaveFunction(spin,kpt,band,spinor,option)
+      
+      return write_cube(filename, self.positions, self.species, self.lattice, wf)
+                
+                
+    def getRealSpaceWaveFunction(self, spin, kpt, band, spinor, option="density"):
+      """ wf = Atoms.getRealSpaceWaveFunction(spin, kpt, band, spinor, option="density")
+      
+      If this Atoms instance has a filehook (pointing to an open ETSF-formatted NetCDF file
+      object), use it to read the realspace wavefunction for a single spin, kpt etc.
+      
+      If option="density", we return Re(wf)** 2 + Im(wf)**2.
+      
+      option="real" - real component
+      option="imag" - imaginary component
+      option="mod" - sqrt(wf * conj(wf))
+      
+      """
+      
+      if option == "real":
+        return self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,0]
+      elif option == "imag":
+        return self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,1]
+      elif option == "density":
+        wf_real = self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,0]
+        wf_imag = self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,1]
+        return wf_real ** 2 + wf_imag ** 2
+      elif option == "mod":
+        wf_real = self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,0]
+        wf_imag = self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,1]
+        return sqrt(wf_real ** 2 + wf_imag ** 2)       
                 
     def getBondLengths(self, cutoff=3.0, animstep=0, give_species=False):
         """ bonds = Atoms.getBondLengths(cutoff=3.0, animstep=1, give_species=False)
