@@ -32,9 +32,12 @@
 
 
 from __future__ import division
-from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin, exp, arange
-from numpy.linalg import norm
-from libabitools import io
+from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin, exp, arange, arccos, arctan2, complex
+from numpy.linalg import norm, inv
+from numpy.fft import fftn, ifftn
+from scipy.interpolate import interp1d
+from scipy.special import sph_harm
+from libabitools import io, speed
 from Scientific.IO import NetCDF
 
 # Debugging flag - set to 1 to see debug messages.
@@ -42,7 +45,7 @@ DEBUG=1
 
 # Element dictionaries
 
-elements = { 1 : "H", 2 : "He", 3 : "Li",  6 : "C", 7 : "N" , 8 : "O", 29 : "Cu" }
+elements = { 1 : "H", 2 : "He", 3 : "Li",  4 : "Be", 5 : "B", 6 : "C", 7 : "N" , 8 : "O", 29 : "Cu" }
 xsf_keywords = ["ANIMSTEPS", "CRYSTAL", "ATOMS", "PRIMVEC", "PRIMCOORD"]
 bond_lengths = {"CH" : 2.06, "CC" : 2.91, "NC" : 2.78, "NH" : 1.91, "HH" : 2.27}
 
@@ -955,7 +958,100 @@ def write_elk(filename, positions, species, is_crystal=False, lattice=None, time
     f.write("\n")    
     f.close()
     return True
+
+def recip_lattice(avec):
+  """ bvec = recip_lattice(avec)
+  
+  Computes the reciprocal lattice vectors for a given crystal lattice. We
+  assume avec is in the form generated for the Atoms class - [a1, a2, a3]
+  where ai is the ith lattice vector (an array). 
+  
+  bvec is returned in the same format.
+  
+  """
     
+  A = mat(avec).T # columns of A are the crystal lattice vectors
+  B = (2 * pi * inv(A)) # Rows of B are the recip lattice vectors
+  return [array(v) for v in B.tolist()]
+    
+def g_vectors(bvec, ngrid):
+  """ gv, [gcx,gcy,gcz], gb = g_vectors(bvec, ngrid)
+  
+  Returns a list of g-vectors (Nx3 array, fortran order).
+  
+  gcx/y/z is a list of three arrays containing the actual recip
+  vector indices (ie, they go negative as appropriate).
+  
+  gb is the biggest G-vector norm.
+  
+  """
+  
+  gcx = zeros((ngrid[0]))
+  gcy = zeros((ngrid[1]))
+  gcz = zeros((ngrid[2]))
+  
+  for i in range(0,int(ngrid[0]/2)+1):
+    gcx[i] = i
+  for i in range(int(ngrid[0]/2) + 1, ngrid[0]):
+    gcx[i] = i - ngrid[0]
+    
+  for i in range(0,int(ngrid[1]/2)+1):
+    gcy[i] = i
+  for i in range(int(ngrid[1]/2) + 1, ngrid[1]):
+    gcy[i] = i - ngrid[1]
+    
+  for i in range(0,int(ngrid[2]/2)+1):
+    gcz[i] = i
+  for i in range(int(ngrid[2]/2) + 1, ngrid[2]):
+    gcz[i] = i - ngrid[2]
+  
+  biggest = 0.0
+  gvs = []
+  for k in range(ngrid[2]):
+    tmpz = gcz[k] * bvec[2]
+    for j in range(ngrid[1]):
+      tmpy = gcy[j] * bvec[1]
+      for i in range(ngrid[0]):
+        gv = tmpz + tmpy + gcx[i] * bvec[0]
+        if norm(gv) > biggest:
+          biggest = norm(gv)
+        gvs.append(gv)
+        
+  
+  return array(gvs), [gcx, gcy, gcz], biggest
+
+def integrate_grids(a, b):
+  """ result =  integrate_grids(a, b)
+  
+  Performs a triple integration of a, b (complex) 
+  over their own grids.
+  
+  Note: this is a LOT slower than the Fortran version in
+  libdft.
+  
+  """
+  
+  # Check the shapes are the same
+  if (a.shape != b.shape):
+    print "(integrate_grids) ERROR: a and b don't have the same shape!"
+    return None
+  
+  # Construct integrand a.conj() * b
+  
+  igrnd = a.conj() * b
+  
+  isum = 0.0+0j
+  nx = a.shape[0]
+  ny = a.shape[1]
+  nz = a.shape[2]
+  
+  for k in range(nz):
+    for m in range(ny):
+      for i in range(nx):
+        isum += igrnd[i,m,k]
+  
+  return isum/(nx*ny*nz)
+  
 def cart2reduced(position, lattice):
     """ reduced = cart2reduced(position, lattice)
     
@@ -1093,53 +1189,101 @@ class Atom:
     f.close()
     
     # Grab the important bits from the header
-    self.element = lines[0].split()[5]
-    self.generation = lines[0].split("-")[1].strip()
     
-    self.zatom = float(lines[1].split()[0])
-    self.zion = float(lines[1].split()[1])
-    self.pspdat = int(lines[1].split()[2])
+    if "All-electron core wavefunctions" in lines[0]:
     
-    self.pspcod = int(lines[2].split()[0])
-    self.pspxc = int(lines[2].split()[1])
-    self.lmax = int(lines[2].split()[2])
-    self.lloc = int(lines[2].split()[3])
-    self.mmax = int(lines[2].split()[4])
-    self.r2well = float(lines[2].split()[5])
-    
-    self.pspfmt = lines[3].split()[0]
-    self.creator = int(lines[3].split()[1])
-    
-    self.basis_size = int(lines[4].split()[0])
-    self.lmn_size = int(lines[4].split()[1])
-    
-    self.orbitals = [int(x) for x in lines[5].split()[0:self.basis_size]]
-    self.number_of_meshes = int(lines[6].split()[0])
-    
-    self.mesh_info = []
-    self.mesh = []
-    for i in range(self.number_of_meshes):
-      meshbits = lines[7+i].split()
-      tmpdict = {}
-      tmpdict["type"] = int(meshbits[1])
-      tmpdict["size"] = int(meshbits[2])
-      tmpdict["rad_step"] = float(meshbits[3])
-      tmpdict["log_step"] = float(meshbits[4])
-      self.mesh_info.append(tmpdict)
-      j = arange(1,tmpdict["size"]+1)
-      if tmpdict["type"] == 1:
-        # Linear grid?
-        self.mesh.append(tmpdict["rad_step"] * j)
-      elif tmpdict["type"] == 2:
-        self.mesh.append(tmpdict["rad_step"] * (exp(tmpdict["log_step"] * (j - 1)) - 1))
+      self.element = lines[0].split()[9]
+      self.generation = lines[0].split("-")[3].strip()
       
-    self.r_cut = float(lines[7+self.number_of_meshes].split()[0])
-    self.shape_type = int(lines[8+self.number_of_meshes].split()[0])
-    self.rshape = float(lines[8+self.number_of_meshes].split()[1])
+      self.method = int(lines[1].split()[0])
+      self.nspinor = int(lines[1].split()[1])
+      self.nsppol = int(lines[1].split()[2])
+      
+      self.zatom = float(lines[2].split()[0])
+      self.zion = float(lines[2].split()[1])
+      self.pspdat = int(lines[2].split()[2])
+      
+      self.pspcod = int(lines[3].split()[0])
+      self.pspxc = int(lines[3].split()[1])
+      self.lmax = int(lines[3].split()[2])
+      
+      self.pspfmt = lines[4].split()[0]
+      self.creator = int(lines[4].split()[1])
+      
+      self.basis_size = int(lines[5].split()[0])
+      self.lmn_size = int(lines[5].split()[1])
+
+      self.orbitals = [int(x) for x in lines[6].split()[0:self.basis_size]]
+      self.number_of_meshes = int(lines[7].split()[0])
+      
+      self.mesh_info = []
+      self.mesh = []
+      for i in range(self.number_of_meshes):
+        meshbits = lines[8+i].split()
+        tmpdict = {}
+        tmpdict["type"] = int(meshbits[1])
+        tmpdict["size"] = int(meshbits[2])
+        tmpdict["rad_step"] = float(meshbits[3])
+        tmpdict["log_step"] = float(meshbits[4])
+        self.mesh_info.append(tmpdict)
+        j = arange(1,tmpdict["size"]+1)
+        if tmpdict["type"] == 1:
+          # Linear grid?
+          self.mesh.append(tmpdict["rad_step"] * j)
+        elif tmpdict["type"] == 2:
+          self.mesh.append(tmpdict["rad_step"] * (exp(tmpdict["log_step"] * (j - 1)) - 1)) 
+        
+        self.r_max = float(lines[8+self.number_of_meshes].split()[0])
+        data = lines[9+self.number_of_meshes:]
+                
+    else:
+      self.element = lines[0].split()[5]
+      self.generation = lines[0].split("-")[1].strip()
     
-    # Now go through and grab all the bits!
+      self.zatom = float(lines[1].split()[0])
+      self.zion = float(lines[1].split()[1])
+      self.pspdat = int(lines[1].split()[2])
+    
+      self.pspcod = int(lines[2].split()[0])
+      self.pspxc = int(lines[2].split()[1])
+      self.lmax = int(lines[2].split()[2])
+      self.lloc = int(lines[2].split()[3])
+      self.mmax = int(lines[2].split()[4])
+      self.r2well = float(lines[2].split()[5])
+    
+      self.pspfmt = lines[3].split()[0]
+      self.creator = int(lines[3].split()[1])
+    
+      self.basis_size = int(lines[4].split()[0])
+      self.lmn_size = int(lines[4].split()[1])
+    
+      self.orbitals = [int(x) for x in lines[5].split()[0:self.basis_size]]
+      self.number_of_meshes = int(lines[6].split()[0])
+    
+      self.mesh_info = []
+      self.mesh = []
+      for i in range(self.number_of_meshes):
+        meshbits = lines[7+i].split()
+        tmpdict = {}
+        tmpdict["type"] = int(meshbits[1])
+        tmpdict["size"] = int(meshbits[2])
+        tmpdict["rad_step"] = float(meshbits[3])
+        tmpdict["log_step"] = float(meshbits[4])
+        self.mesh_info.append(tmpdict)
+        j = arange(1,tmpdict["size"]+1)
+        if tmpdict["type"] == 1:
+          # Linear grid?
+          self.mesh.append(tmpdict["rad_step"] * j)
+        elif tmpdict["type"] == 2:
+          self.mesh.append(tmpdict["rad_step"] * (exp(tmpdict["log_step"] * (j - 1)) - 1))
+      
+      self.r_cut = float(lines[7+self.number_of_meshes].split()[0])
+      self.shape_type = int(lines[8+self.number_of_meshes].split()[0])
+      self.rshape = float(lines[8+self.number_of_meshes].split()[1])
+      data = lines[9+self.number_of_meshes:]
+    
     self.data = []
-    data = lines[9+self.number_of_meshes:]
+    # Now go through and grab all the bits!
     is_data = True
     while (is_data):
       # Header of the chunk specifies the length.
@@ -1152,6 +1296,13 @@ class Atom:
         chunk["mesh index"] = int(data[1].split()[0])
         if "VHntZC" in chunk["title"]:
           self.vloc_format = int(data[1].split()[1]) 
+        elif "Core wave functions" in chunk["title"]:
+          chunk["core n"] = int(data[2].split()[0])
+          chunk["core l"] = int(data[2].split()[1])
+          chunk["core s"] = int(data[2].split()[2])
+          chunk["core E"] = float(data[3].split()[0]) / 2 # Convert immediately to Ha from Ry.
+          chunk["core occ"] = float(data[3].split()[1])
+          data = data[2:]
         data = data[2:]
         size = self.mesh_info[chunk["mesh index"] - 1]["size"]
       else:
@@ -1173,23 +1324,85 @@ class Atom:
       if len(data) == 0:
         is_data = False
     
-    # Expand rhoij and dij matrices into a triangular matrix.
-    for i, d in enumerate(self.data):
-      if "Rhoij0" in d['title']:
-        self.iRhoij0 = i
-      elif "Dij0" in d['title']:
-        self.iDij0 = i
+    if "paw" in self.pspfmt:
+      # Expand rhoij and dij matrices into a triangular matrix.
+      for i, d in enumerate(self.data):
+        if "Rhoij0" in d['title']:
+          self.iRhoij0 = i
+        elif "Dij0" in d['title']:
+          self.iDij0 = i
     
-    self.Dij0 = zeros((self.lmn_size, self.lmn_size))
-    self.Rhoij0 = zeros((self.lmn_size, self.lmn_size))
+      self.Dij0 = zeros((self.lmn_size, self.lmn_size))
+      self.Rhoij0 = zeros((self.lmn_size, self.lmn_size))
     
-    for row in range(1, self.lmn_size+1):
-      for column in range(1, row+1):
-        self.Dij0[row - 1, column - 1] = self.data[self.iDij0]['data'][(row  - 1 + (row -1 )** 2) / 2 + column - 1]
-        self.Rhoij0[row - 1, column - 1] = self.data[self.iRhoij0]['data'][(row - 1 + (row - 1) ** 2) / 2 + column - 1]
+      for row in range(1, self.lmn_size+1):
+        for column in range(1, row+1):
+          self.Dij0[row - 1, column - 1] = self.data[self.iDij0]['data'][(row  - 1 + (row -1 )** 2) / 2 + column - 1]
+          self.Rhoij0[row - 1, column - 1] = self.data[self.iRhoij0]['data'][(row - 1 + (row - 1) ** 2) / 2 + column - 1]
     
+  def radial2Cart(self, data_index, r, r0):
+    """ psi = Atom.radial2Cart(data_index, r, r0)
     
-        
+    Given an atomic centre r0, calculate the actual value of the requested function
+    in realspace at position r.
+    
+    r, r0 are expected to be 3-element numpy arrays.
+    
+    """
+    
+    # Check we're within the PAW cutoff radius.
+    if "paw" in self.pspfmt:
+      rcut = self.r_cut
+    elif "core" in self.pspfmt:
+      rcut = self.r_max
+    if norm(r - r0) > rcut:
+      return 0
+    if self.data[data_index]['mesh index'] == -1:
+      print "Requested data does not represent a radial function."
+      return None
+    else:
+      ur = self.data[data_index]['data']
+      rr = self.mesh[self.data[data_index]['mesh index'] - 1]
+      u = interp1d(rr, ur)
+      
+      # Use the title of the data to figure out which orbital
+      # this is (hence the angular momentum)
+      
+      l = self.orbitals[int(self.data[data_index]['title'].split()[-1])-1]
+    
+    # Get the spherical coordinates of our displacement vector  
+    s = r - r0
+    rho = norm(s)
+    theta = arccos(s[2]/rho)
+    phi = arctan2(s[1], s[0])
+    
+    # We aren't doing this in the presence of a magnetic field
+    # so we can just use m=0 for our spherical harmonic.
+    
+    return u(rho) / rho * sph_harm(0,l,theta,phi)
+    
+  def expandOntoGrid(self, data_index, ngrid, avec, r0):
+    """ grid = Atom.expandOntoGrid(ngrid, avec, r0)
+    
+    Expand the specified dataset onto a grid with grid
+    dimensions ngrid and unit vectors avec[i]/ngrid[i]. 
+    
+    Place the atomic sphere at position r0.
+    
+    """
+    
+    grid = zeros(ngrid, dtype="complex")
+    
+    for i in range(ngrid[0]):
+      for j in range(ngrid[1]):
+        for k in range(ngrid[2]):
+          r = i/ngrid[0] * avec[0] + j/ngrid[1] * avec[1] + k/ngrid[2] * avec[2]
+          grid[i,j,k] = self.radial2Cart(data_index, r, r0)
+    
+    # Renormalize.
+    inorm = integrate_grids(grid,grid)
+    return grid/sqrt(inorm)
+              
         
 class Atoms:
     """ Atoms class: a collection of atoms (possibly with a crystal structure)
@@ -1211,6 +1424,7 @@ class Atoms:
                                 # keep a filehook and just read as necessary.
                                 # An example is any of the larger NetCDF output
                                 # files from Abinit.
+    ngrid = []                  # size of real-space grid.
     test = []                   # Test output
     
     def clean(self):
@@ -1221,12 +1435,13 @@ class Atoms:
       """
       
       self.is_crystal = True
-      self.lattce = []
+      self.lattice = []
       self.positions = []
       self.forces = []
       self.species = []
       self.densities = []
       self.wfks = []
+      self.ngrid = []
       if self.filehook:
         self.filehook.close()
         self.filehook = 0
@@ -1280,9 +1495,20 @@ class Atoms:
       self.clean()
       
       f = NetCDF.NetCDFFile(filename, 'r')
-      self.positions = [[array(x) for x in f.variables['reduced_atom_positions'][:]]]
-      self.lattice = [[array(x) for x in f.variables['primitive_vectors'][:]]]
+      pos = [array(x) for x in f.variables['reduced_atom_positions'][:]]
+      avec = [array(x) for x in f.variables['primitive_vectors'][:]]
       
+      self.positions.append(reduced2cart(pos,avec))
+      self.lattice.append(avec)
+      self.recip_lattice = [recip_lattice(avec)]
+      
+      n1 = f.dimensions['number_of_grid_points_vector1']
+      n2 = f.dimensions['number_of_grid_points_vector2']
+      n3 = f.dimensions['number_of_grid_points_vector3']
+      self.ngrid = [n1, n2, n3]
+      
+      # Generate G-vectors (we need them for WF calculations)
+      self.g_vectors, self.g_coords,self.max_g = g_vectors(self.recip_lattice[0],self.ngrid)     
       znucl = f.variables['atomic_numbers'][:]
       self.species = [[int(znucl[x-1]) for x in f.variables['atom_species'][:]]]
       self.filehook = f
@@ -1594,8 +1820,37 @@ class Atoms:
                 self.positions.append(positions)
                 self.forces.append(forces)
                 self.species.append(species)
+    
+#     def gradWF(self, spin, kpt, band, spinor):
+#       """ gx, gy, gz = Atoms.gradWF(spin,kpt,band,spinor)
+#       
+#       If this Atoms instance has a filehook to a ETSF WF file, return
+#       the gradient of a specific wavefunction using a FFT method.
+#       
+#       The returned grids are the components of the complex gradient
+#       with respect to the cartesian axes.
+#       
+#       """
+#       
+#       psi = self.getRealSpaceWF(spin,kpt,band,spinor)
+#       reduced_k = self.filehook.variables['reduced_coordinates_of_kpoints'][kpt]
+#       K = reduced2cart(reduced_k, self.recip_lattice[0])
+#       
+#       print "Got psi and K"
+#       psiG = fftn(psi)
+#       print "Got past fftn!"
+#       
+#       speed.grad_wf(K, self.g_vectors, psiG)
+#       grad = speed.grd[:]
+#       
+#       print "Got past grad!"
+#       gx = grad[:,:,:,0]
+#       gy = grad[:,:,:,1]
+#       gz = grad[:,:,:,2]
+#       
+#       return ifftn(gx), ifftn(gy), ifftn(gz)
                 
-    def writeWaveFunctionCube(self, filename, spin,kpt,band,spinor, option="density"):
+    def writeWFCube(self, filename, spin,kpt,band,spinor, option="density"):
       """ succeeded = Atoms.writeWaveFunctionCube(filename, spin, kpt, band, spinor, option="density")
       
       If this Atoms instance has a filehook (must point to an open and valid ETSF-formatted
@@ -1606,37 +1861,32 @@ class Atoms:
       
       """
       
-      wf = self.getRealSpaceWaveFunction(spin,kpt,band,spinor,option)
+      wf = self.getRealSpaceWF(spin,kpt,band,spinor)
       
-      return write_cube(filename, self.positions, self.species, self.lattice, wf)
-                
-                
-    def getRealSpaceWaveFunction(self, spin, kpt, band, spinor, option="density"):
-      """ wf = Atoms.getRealSpaceWaveFunction(spin, kpt, band, spinor, option="density")
+      if option == "real":
+        d = real(wf)
+      elif option == "imag":
+        d = imag(wf)
+      elif option == "density":
+        d = real(wf) ** 2 + imag(wf) ** 2
+      elif option == "mod":
+        d = sqrt(real(wf) ** 2 + imag(wf) ** 2)
+        
+      return write_cube(filename, self.positions, self.species, self.lattice, d)
+                        
+    def getRealSpaceWF(self, spin, kpt, band, spinor):
+      """ wf = Atoms.getRealSpaceWaveFunction(spin, kpt, band, spinor)
       
       If this Atoms instance has a filehook (pointing to an open ETSF-formatted NetCDF file
       object), use it to read the realspace wavefunction for a single spin, kpt etc.
       
-      If option="density", we return Re(wf)** 2 + Im(wf)**2.
-      
-      option="real" - real component
-      option="imag" - imaginary component
-      option="mod" - sqrt(wf * conj(wf))
       
       """
       
-      if option == "real":
-        return self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,0]
-      elif option == "imag":
-        return self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,1]
-      elif option == "density":
-        wf_real = self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,0]
-        wf_imag = self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,1]
-        return wf_real ** 2 + wf_imag ** 2
-      elif option == "mod":
-        wf_real = self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,0]
-        wf_imag = self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,1]
-        return sqrt(wf_real ** 2 + wf_imag ** 2)       
+      wf_real = self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,0]
+      wf_imag = self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,1]
+      
+      return wf_real + 1j*wf_imag     
                 
     def getBondLengths(self, cutoff=3.0, animstep=0, give_species=False):
         """ bonds = Atoms.getBondLengths(cutoff=3.0, animstep=1, give_species=False)
