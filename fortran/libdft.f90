@@ -148,10 +148,14 @@ module optical
     
   end subroutine
   
-  subroutine set_wff(new_wff, new_kpt)
+  subroutine set_wff(new_wff, new_kpt, L, M, N)
   
-    double precision :: new_kpt(3)
-    double complex, dimension(:,:,:) :: new_wff
+    !! We need to be careful here because we get segfaults when the arrays are
+    !! large. So, explicitly declare size of new wf.
+    
+    integer, intent(in) :: L, M, N
+    double precision, intent(in) :: new_kpt(3)
+    double complex, intent(in) :: new_wff(L, M, N)
   
     kpt(:) = new_kpt(:)
     
@@ -298,7 +302,24 @@ module optical
     
     work = work / (nx * ny * nz)
   
-  end subroutine 
+  end subroutine
+  
+  subroutine fft_work(direction)
+  
+    integer, intent(in) :: direction ! Can be FFTW_FORWARD (-1) or
+                                     ! FFTW_BACKWARD (1). No checks!
+    
+    call dfftw_plan_dft_3d(plan,nx, ny, nz, work, work, direction, FFTW_ESTIMATE)
+    call dfftw_execute_dft(plan, work, work)
+    call dfftw_destroy_plan(plan)
+    
+    ! If the direction is backwards, re-normalize.
+    
+    if (direction .eq. FFTW_BACKWARD) then
+      work = work / (nx * ny * nz)
+    end if
+    
+  end subroutine
   
   subroutine optical_matrix_element(axis, out_ome)
   
@@ -322,4 +343,104 @@ module optical
   end subroutine
       
 end module
+
+module paw
+
+  !! Module for calculating properties inside PAW spheres instead of over
+  ! linear grids. Not sure if this will work but if it does, should be
+  ! much much (much!) faster.
+
+  implicit none
+  
+  ! These variables store the x,y,z indices and the wf value for linear grid
+  ! points only inside a particular PAW sphere. Used to calculate linear grid
+  ! integrals over the sphere (things like <phi_i | psi_nk>).
+  
+  double precision :: paw_sphere_radius
+  double precision :: sphere_centre(3)
+  integer :: N ! Number of points inside PAW sphere
+  integer, allocatable, dimension(:) :: px, py, pz
+  double precision, allocatable, dimension(:) :: rx, ry, rz
+  double complex, allocatable, dimension(:) :: paw_wf
+  
+  contains
+  
+  subroutine sphere_points_locate(grid_size, grid_n, r0, paw_radius)
+  
+    double precision :: grid_size(3), r0(3), paw_radius
+    double precision :: gv(3), cell_size(3), gn
+    integer :: grid_n(3), i, j, k, p
+    
+    ! Use the passed parameters to configure module variables.
+    paw_sphere_radius = paw_radius
+    sphere_centre(1:3) = r0(1:3)
+    cell_size(1) = grid_size(1) / grid_n(1)
+    cell_size(2) = grid_size(2) / grid_n(2)
+    cell_size(3) = grid_size(3) / grid_n(3)
+    
+    ! Loop over grid indices, generate grid points and figure out if they are
+    ! in the sphere or not.
+    p = 0
+    do k=1,grid_n(3)
+      gv(3) = (k - 1) * cell_size(3)
+      do j=1,grid_n(2)
+        gv(2) = (j - 1) * cell_size(2)
+        do i=1,grid_n(1)
+          gv(1) = (i - 1) * cell_size(1)
+          gn = sqrt((gv(1)-r0(1)) ** 2 + (gv(2)-r0(2)) ** 2 + &
+          &        (gv(3)-r0(3)) ** 2)
+          
+          if (gn .le. paw_radius) then
+            p = p + 1
+          end if
+        end do
+      end do
+    end do
+          
+    ! Now we know how many points we have, we can allocate the arrays and
+    ! go through the loop again to add the points.
+    
+    if (allocated(px)) deallocate(px)
+    if (allocated(py)) deallocate(py)
+    if (allocated(pz)) deallocate(pz)
+    if (allocated(rx)) deallocate(rx)
+    if (allocated(ry)) deallocate(ry)
+    if (allocated(rz)) deallocate(rz)
+    if (allocated(paw_wf)) deallocate(paw_wf)
+    
+    allocate(px(p), py(p), pz(p), rx(p), ry(p), rz(p), paw_wf(p))
+    N = p
+    
+    p = 1
+    do k=1,grid_n(3)
+      gv(3) = (k - 1) * cell_size(3)
+      do j=1,grid_n(2)
+        gv(2) = (j - 1) * cell_size(2)
+        do i=1,grid_n(1)
+          gv(1) = (i - 1) * cell_size(1)
+          gn = sqrt((gv(1)-r0(1)) ** 2 + (gv(2)-r0(2)) ** 2 + &
+          &        (gv(3)-r0(3)) ** 2)
+          
+          if (gn .le. paw_radius) then
+            px(p) = i
+            py(p) = j
+            pz(p) = k
+            rx(p) = gv(1)
+            ry(p) = gv(2)
+            rz(p) = gv(3)
+            p = p + 1
+          end if
+        end do
+      end do
+    end do
+   
+    print *, "Number of grid points: ", grid_n(1) * grid_n(2) * grid_n(3)
+    print *, "Number of points inside sphere:", N
+    print *, "Reduction factor: ", N / (grid_n(1) * grid_n(2) * grid_n(3))
+    
+  end subroutine
+  
+end module
+          
+    
   

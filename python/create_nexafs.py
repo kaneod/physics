@@ -9,14 +9,14 @@ reload(el) # Just in case...
 print "Hello!"
 print ""
 
-core_wf_file = "C.GGA-PBE-corewf.abinit"
-ae_wf_file = "o_AE_WFK-etsf.nc"
+core_wf_file = "/home/kane/Desktop/Calculations/atomic_data/carbon/C.GGA-PBE-corewf.abinit"
+ae_wf_file = "/home/kane/Desktop/Calculations/porphyrins/pT-corehole/poro_AE_WFK-etsf.nc"
 
 c = el.Atom(core_wf_file)
 d = el.Atoms(ae_wf_file, "ETSF")
 
 core_index = 0    # Atomic core level to use from the core_wf file.
-site_index = 1    # Atomic site to place the core wavefunction on.
+site_index = 81    # Atomic site to place the core wavefunction on.
 optical_axis = 1 
 
 print "Using state %d from core wavefunction file: %s" % (core_index, core_wf_file)

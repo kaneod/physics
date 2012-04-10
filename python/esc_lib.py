@@ -37,7 +37,7 @@ from numpy.linalg import norm, inv
 from numpy.fft import fftn, ifftn
 from scipy.interpolate import interp1d
 from scipy.special import sph_harm
-from libabitools import io, speed
+from libabitools import io
 from Scientific.IO import NetCDF
 
 # Debugging flag - set to 1 to see debug messages.
@@ -1508,7 +1508,7 @@ class Atoms:
       self.ngrid = [n1, n2, n3]
       
       # Generate G-vectors (we need them for WF calculations)
-      self.g_vectors, self.g_coords,self.max_g = g_vectors(self.recip_lattice[0],self.ngrid)     
+      #self.g_vectors, self.g_coords,self.max_g = g_vectors(self.recip_lattice[0],self.ngrid)     
       znucl = f.variables['atomic_numbers'][:]
       self.species = [[int(znucl[x-1]) for x in f.variables['atom_species'][:]]]
       self.filehook = f
