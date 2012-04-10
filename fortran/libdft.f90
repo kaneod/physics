@@ -85,6 +85,17 @@ module optical
   
   double precision :: ome
   
+  ! Variables for the PAW-sphere option for integration
+  
+  double precision :: paw_rcut
+  double precision :: paw_sph(3)
+  integer :: ns ! Number of points inside PAW sphere
+  integer, allocatable, dimension(:) :: px, py, pz ! Grid indices inside sphere.
+  double precision, allocatable, dimension(:) :: rx, ry, rz ! Cartesian coords.
+  double complex, allocatable, dimension(:) :: paw_wfi ! WF inside sphere.
+  double complex, allocatable, dimension(:) :: paw_wff
+  double complex, allocatable, dimension(:) :: paw_work
+  
   contains
   
   subroutine test_init(L)
@@ -262,6 +273,27 @@ module optical
   
   end function
   
+  double complex function integrate_sphere(a, b)
+  
+    ! Same as integrate_grids but only on the restricted set of
+    ! points within the PAW sphere.
+    
+    integer :: p
+    double complex, dimension(:) :: a, b
+    
+    integrate_sphere = (0.0d0, 0.0d0)
+    
+    do p=1,ns
+      integrate_sphere = integrate_sphere + conjg(a(p)) * b(p)
+    end do
+    
+    ! This might not be wholly accurate: check!
+    integrate_sphere = integrate_sphere / ns
+    
+    return
+    
+  end function
+  
   subroutine wff_gradient(axis)
   
     ! Compute grad(psi)_axis for a wavefunction loaded to wff.
@@ -341,29 +373,6 @@ module optical
     out_ome = ome
   
   end subroutine
-      
-end module
-
-module paw
-
-  !! Module for calculating properties inside PAW spheres instead of over
-  ! linear grids. Not sure if this will work but if it does, should be
-  ! much much (much!) faster.
-
-  implicit none
-  
-  ! These variables store the x,y,z indices and the wf value for linear grid
-  ! points only inside a particular PAW sphere. Used to calculate linear grid
-  ! integrals over the sphere (things like <phi_i | psi_nk>).
-  
-  double precision :: paw_sphere_radius
-  double precision :: sphere_centre(3)
-  integer :: N ! Number of points inside PAW sphere
-  integer, allocatable, dimension(:) :: px, py, pz
-  double precision, allocatable, dimension(:) :: rx, ry, rz
-  double complex, allocatable, dimension(:) :: paw_wf
-  
-  contains
   
   subroutine sphere_points_locate(grid_size, grid_n, r0, paw_radius)
   
@@ -372,8 +381,8 @@ module paw
     integer :: grid_n(3), i, j, k, p
     
     ! Use the passed parameters to configure module variables.
-    paw_sphere_radius = paw_radius
-    sphere_centre(1:3) = r0(1:3)
+    paw_rcut = paw_radius
+    paw_sph(1:3) = r0(1:3)
     cell_size(1) = grid_size(1) / grid_n(1)
     cell_size(2) = grid_size(2) / grid_n(2)
     cell_size(3) = grid_size(3) / grid_n(3)
@@ -406,10 +415,14 @@ module paw
     if (allocated(rx)) deallocate(rx)
     if (allocated(ry)) deallocate(ry)
     if (allocated(rz)) deallocate(rz)
-    if (allocated(paw_wf)) deallocate(paw_wf)
+    if (allocated(paw_wfi)) deallocate(paw_wfi)
+    if (allocated(paw_wff)) deallocate(paw_wff)
+    if (allocated(paw_work)) deallocate(paw_work)
     
-    allocate(px(p), py(p), pz(p), rx(p), ry(p), rz(p), paw_wf(p))
-    N = p
+    allocate(px(p), py(p), pz(p), rx(p), ry(p), rz(p))
+    allocate(paw_wfi(p), paw_wff(p), paw_work(p))
+    
+    ns = p
     
     p = 1
     do k=1,grid_n(3)
@@ -436,7 +449,7 @@ module paw
    
     print *, "Number of grid points: ", grid_n(1) * grid_n(2) * grid_n(3)
     print *, "Number of points inside sphere:", N
-    print *, "Reduction factor: ", N / (grid_n(1) * grid_n(2) * grid_n(3))
+    print *, "Reduction factor: ", real(N) / (grid_n(1) * grid_n(2) * grid_n(3))
     
   end subroutine
   
