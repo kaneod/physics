@@ -17,7 +17,6 @@ d = el.Atoms(ae_wf_file, "ETSF")
 
 core_index = 0    # Atomic core level to use from the core_wf file.
 site_index = 81    # Atomic site to place the core wavefunction on.
-optical_axis = 1 
 
 print "Using state %d from core wavefunction file: %s" % (core_index, core_wf_file)
 print "Placing core state onto site %d from file: %s" % (site_index, ae_wf_file)
@@ -31,89 +30,106 @@ print "done!"
 print "Initializing Fortran optical module...",
 avec = array(d.lattice[0])
 bvec = array(el.recip_lattice(d.lattice[0]))
-dft.optical.init(c1s, avec, bvec)
+dft.optical.init(c1s, avec, bvec, d.positions[0][site_index], 1.1)
 print "done!"
 
 gw = 0.02 # Gaussian smearing, Ha
-lw = 0.02 # Lorentzian smearing, Ha
-
-def gaussian(x,w):
-  return 1.0 / (w * sqrt(2*pi)) * exp(-x ** 2 / (2 * w ** 2))
-  
-def lorentzian(x,w):
-  return (1.0/ pi) * w / (x ** 2 + w ** 2)
+lw = 0.005 # Lorentzian smearing, Ha
 
 efs = d.filehook.variables['eigenvalues'][:] # spin, kpt, band
 ei = c.data[core_index]['core E']
 occf = d.filehook.variables['occupations'][:]
 occi = c.data[core_index]['core occ']
 
-E = []
-I = []
-Ig = []
-for s in range(d.filehook.dimensions['number_of_spins']):
-  for k in range(d.filehook.dimensions['number_of_kpoints']):
-    for b in range(d.filehook.dimensions['max_number_of_states']):
-      
-      ef = efs[s,k,b]
-      ff = occf[s,k,b]
-      
-      E.append(ef - ei)
-      
-      # Set wff to the current wavefunction.
-      reduced_k = d.filehook.variables['reduced_coordinates_of_kpoints'][k]
-      kpt = el.reduced2cart(reduced_k, d.recip_lattice[0])
-      dft.optical.set_wff(d.getRealSpaceWF(s,k,b,0), kpt)
-      
-      # Calculate <core|grad|final>
-      ome = dft.optical.optical_matrix_element(optical_axis)
-      
-      # Divide by energy difference squared
-      # <i|del_x|f> / (ei - ef)
-      o = ome / (ef - ei) ** 2
-      
-      # Multiply by the difference between the occupancy of the
-      # final state and 2 (ie, 2 electrons) and divide out the
-      # double factor.
-      
-      o = o * (2.0 - occf[s,k,b]) / 2.0
-      
-      Ig.append(ome)
-      I.append(o)
+Eall = []
+Iall = []
+Igall = []
+for oa in [1,2,3]: # The optical axes
+  E = []
+  I = []
+  Ig = []
+  for s in range(d.filehook.dimensions['number_of_spins']):
+    for k in range(d.filehook.dimensions['number_of_kpoints']):
+      for b in range(d.filehook.dimensions['max_number_of_states']):
+        
+        if abs(occf[s,k,b] - 2.0) < 1e-8:
+          print "State s,k,b = %d %d %d is fully occupied, not calculating." % (s,k,b)
+        else:
+        
+          print "Processing s,k,b: ", s, k, b
+          ef = efs[s,k,b]
+          ff = occf[s,k,b]
+        
+          E.append(ef - ei)
+        
+          # Set wff to the current wavefunction.
+          reduced_k = d.filehook.variables['reduced_coordinates_of_kpoints'][k]
+          kpt = el.reduced2cart(reduced_k, d.recip_lattice[0])
+          dft.optical.set_wff(d.getRealSpaceWF(s,k,b,0), kpt)
+          
+          # Calculate <core|grad|final>
+          ome = dft.optical.optical_matrix_element(oa)
+         
+          # Divide by energy difference squared
+          # <i|del_x|f> / (ei - ef)
+          o = ome / (ef - ei) ** 2
+        
+          # Multiply by the difference between the occupancy of the
+          # final state and 2 (electrons) and divide out the
+          # double factor.
+        
+          o = o * (2.0 - occf[s,k,b]) / 2.0
+        
+          Ig.append(ome)
+          I.append(o)
 
-ion()
+  Eall.append(E)
+  Iall.append(I)
+  Igall.append(Ig)
+  
+
 #plot(E,I, 'rd')
 #plot(E,Ig, 'bd')
 
+print ""
+print "Finished OME calculations."
+print ""
+print "Sorting data by energy...",
 # Create a dictionary of the E,I values
-EIDict = {}
-for (ee, ii) in zip(E,I):
-  EIDict[ee] = ii
+all_data = []
+for (E, I, Ig) in zip(Eall, Iall, Igall):
+  EIDict = {}
+  EIgDict = {}
+  for (ee, ii, ig) in zip(E,I, Ig):
+    EIDict[ee] = ii
+    EIgDict[ee] = ig
 
-# Sort by keys
-EE = []
-II = []
-for key in sorted(EIDict.iterkeys()):
-  EE.append(key)
-  II.append(EIDict[key])
+  # Sort by keys
+  EE = []
+  II = []
+  IG = []
+  for key in sorted(EIDict.iterkeys()):
+    EE.append(key)
+    II.append(EIDict[key])
+    IG.append(EIgDict[key])
+    
+  all_data.append([EE,II,IG])
 
-#plot(EE,II, 'rd')
-# Convolute with a gaussian
-Ic = el.gaussian_convolute(array(EE), array(II), 0.01)
-#plot(EE,Ic, 'b-')
-
+print "done"
+print "Writing to file nexafs_output_raw.dat...",
 # Construct a linear energy space, 1 hartree either end
-energy = linspace(min(EE) - 1, max(EE) + 1, 1000)
-intensity = zeros(energy.shape)
+#energy = linspace(min(EE) - 1, max(EE) + 1, 4000)
+#intensity = el.gl_smear(EE*27.211, II, energy, gw,lw)
 
-# For each energy, sum a gaussian/lorentzian from each eigenvalue.
-for i, en in enumerate(energy):
-  for eeig, ieig in zip(EE, II):
-  
-    # Artificial: ignore silly large values
-    if ieig < 10:
-      gauss = gaussian(en - eeig, gw)
-      lorentz = lorentzian(en - eeig, lw)
-      intensity[i] = intensity[i] + ieig * gauss * lorentz
-      
-plot(energy, intensity, 'r-')
+f = open("nexafs_output_raw.dat", 'w')
+f.write("# NEXAFS raw eigenvalue/OME data.\n")
+f.write("# Columns:\n")
+f.write("# energy ome_axis1 ome_axis2 ome_axis3 intens_axis1 intens_axis2 intens_axis3\n")
+for i in range(len(all_data[0][0])):
+  f.write("%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\n" % (all_data[0][0][i], all_data[0][2][i], all_data[1][2][i], all_data[2][2][i], all_data[0][1][i], all_data[1][1][i], all_data[2][1][i]))
+
+f.close()
+print "done"
+print ""
+print "Finished calculation!"
+

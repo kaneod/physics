@@ -104,30 +104,35 @@ module optical
     
     integer :: L
     double complex :: twf(L, L, L)
-    double precision :: lvec(3,3)
+    double precision :: lvec(3,3), r0(3)
     
     twf = 0.0d0
     
-    lvec(1,1) = 1
+    lvec(1,1) = 10
     lvec(2,1) = 0
     lvec(3,1) = 0
     lvec(1,2) = 0
-    lvec(2,2) = 1
+    lvec(2,2) = 10
     lvec(3,2) = 0
     lvec(1,3) = 0
     lvec(2,3) = 0
-    lvec(3,3) = 1
+    lvec(3,3) = 10
     
-    call init(twf, lvec, lvec, L, L, L)
+    r0(1) = 5.0d0
+    r0(2) = 5.0d0
+    r0(3) = 5.0d0
+    
+    call init(twf, lvec, lvec, r0, 1.0d0, L, L, L)
     
   end subroutine
   
-  subroutine init(core_wf, lattice, recip_lattice, L, M, N)
+  subroutine init(core_wf, lattice, recip_lattice, r0, rcut, L, M, N)
     
     integer :: i,j
     integer, intent(in) :: L, M, N
     double complex, intent(in) :: core_wf(L, M, N)
-    double precision, intent(in) :: lattice(3,3), recip_lattice(3,3)
+    double precision, intent(in) :: lattice(3,3), recip_lattice(3,3), r0(3), &
+    &                               rcut
     
     if (allocated(wff)) deallocate(wff)
     if (allocated(wfi)) deallocate(wfi)
@@ -148,14 +153,31 @@ module optical
       end do
     end do
     
+    ! Set up spherical regions for integration    
+    call sphere_points_locate(r0, rcut)
+    
+    ! Generate g-vectors over the full grid
     call generate_g_vectors
+    
+    ! Copy inputs to working grids and spheres.
     call wf_copy(core_wf, wfi)
     call wf_copy(core_wf, wff)
+    call wf_grid_to_sph(wfi, paw_wfi)
+    call wf_grid_to_sph(wff, paw_wff)
+    
+    ! Check sphere integration isn't crazy
+    print *,"Sphere integration result:", integrate_sphere(paw_wfi,paw_wfi)
     
     ! For now just set the working k-point to gamma.
     kpt(1) = 0.0d0
     kpt(2) = 0.0d0
     kpt(3) = 0.0d0
+    
+    ! In case we are going to multi-thread fftw, init it here.
+    print *, "Initializing FFTW threading..."
+    call dfftw_init_threads
+    print *, "Using 4 threads for FFTW."
+    call dfftw_plan_with_nthreads(4)
     
   end subroutine
   
@@ -171,6 +193,7 @@ module optical
     kpt(:) = new_kpt(:)
     
     call wf_copy(new_wff, wff)
+    call wf_grid_to_sph(new_wff, paw_wff)
     
   end subroutine
   
@@ -188,6 +211,18 @@ module optical
           b(i,j,k) = a(i,j,k)
         end do
       end do
+    end do
+    
+  end subroutine
+  
+  subroutine wf_grid_to_sph(a, b)
+  
+    integer :: p
+    double complex, dimension(:,:,:) :: a
+    double complex, dimension(:) :: b
+    
+    do p=1,ns
+      b(p) = a(px(p), py(p), pz(p))
     end do
     
   end subroutine
@@ -299,6 +334,7 @@ module optical
     ! Compute grad(psi)_axis for a wavefunction loaded to wff.
     ! Note: use set_wff to set the wavefunction and the working
     ! kpt. axis can be 1, 2 or 3.
+    ! paw_work is updated at the end of the routine.
   
     integer :: p, i, j, k
     integer, intent(in) :: axis
@@ -333,6 +369,9 @@ module optical
     call dfftw_destroy_plan(plan)
     
     work = work / (nx * ny * nz)
+    
+    ! Update paw_work to reflect change in work.
+    call wf_grid_to_sph(work, paw_work)
   
   end subroutine
   
@@ -364,7 +403,8 @@ module optical
     call wff_gradient(axis)
     
     ! Now integrate <wfi|work>
-    ovlp = integrate_grids(wfi, work)
+    !ovlp = integrate_grids(wfi, work)
+    ovlp = integrate_sphere(paw_wfi, paw_work)
     
     ! The OME itself is the norm squared.
     ome = realpart(conjg(ovlp) * ovlp)
@@ -374,28 +414,33 @@ module optical
   
   end subroutine
   
-  subroutine sphere_points_locate(grid_size, grid_n, r0, paw_radius)
+  subroutine sphere_points_locate(r0, paw_radius)
   
-    double precision :: grid_size(3), r0(3), paw_radius
-    double precision :: gv(3), cell_size(3), gn
-    integer :: grid_n(3), i, j, k, p
+    double precision :: r0(3), paw_radius
+    double precision :: gv(3), gn
+    integer :: i, j, k, p
+    
+    double precision :: tmp_uv(3,3)
     
     ! Use the passed parameters to configure module variables.
     paw_rcut = paw_radius
     paw_sph(1:3) = r0(1:3)
-    cell_size(1) = grid_size(1) / grid_n(1)
-    cell_size(2) = grid_size(2) / grid_n(2)
-    cell_size(3) = grid_size(3) / grid_n(3)
+    
+    ! Make "step" vectors.
+    tmp_uv(1:3,1) = avec(1:3,1) / nx
+    tmp_uv(1:3,2) = avec(1:3,2) / ny
+    tmp_uv(1:3,3) = avec(1:3,3) / nz
     
     ! Loop over grid indices, generate grid points and figure out if they are
     ! in the sphere or not.
     p = 0
-    do k=1,grid_n(3)
-      gv(3) = (k - 1) * cell_size(3)
-      do j=1,grid_n(2)
-        gv(2) = (j - 1) * cell_size(2)
-        do i=1,grid_n(1)
-          gv(1) = (i - 1) * cell_size(1)
+    do k=1,nz
+      do j=1,ny
+        do i=1,nx
+          gv = (i-1) * tmp_uv(1:3,1) + &
+          &    (j-1) * tmp_uv(1:3,2) + &
+          &    (k-1) * tmp_uv(1:3,3)
+          
           gn = sqrt((gv(1)-r0(1)) ** 2 + (gv(2)-r0(2)) ** 2 + &
           &        (gv(3)-r0(3)) ** 2)
           
@@ -425,12 +470,12 @@ module optical
     ns = p
     
     p = 1
-    do k=1,grid_n(3)
-      gv(3) = (k - 1) * cell_size(3)
-      do j=1,grid_n(2)
-        gv(2) = (j - 1) * cell_size(2)
-        do i=1,grid_n(1)
-          gv(1) = (i - 1) * cell_size(1)
+    do k=1,nz
+      do j=1,ny
+        do i=1,nx
+          gv = (i-1) * tmp_uv(1:3,1) + &
+          &    (j-1) * tmp_uv(1:3,2) + &
+          &    (k-1) * tmp_uv(1:3,3)
           gn = sqrt((gv(1)-r0(1)) ** 2 + (gv(2)-r0(2)) ** 2 + &
           &        (gv(3)-r0(3)) ** 2)
           
@@ -447,9 +492,9 @@ module optical
       end do
     end do
    
-    print *, "Number of grid points: ", grid_n(1) * grid_n(2) * grid_n(3)
-    print *, "Number of points inside sphere:", N
-    print *, "Reduction factor: ", real(N) / (grid_n(1) * grid_n(2) * grid_n(3))
+    print *, "Number of grid points: ", nx * ny * nz
+    print *, "Number of points inside sphere:", ns
+    print *, "Reduction factor: ", real(nx * ny * nz) / ns
     
   end subroutine
   

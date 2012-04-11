@@ -32,7 +32,7 @@
 
 
 from __future__ import division
-from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin, exp, arange, arccos, arctan2, complex
+from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin, exp, arange, arccos, arctan2, complex, polyfit, poly1d
 from numpy.linalg import norm, inv
 from numpy.fft import fftn, ifftn
 from scipy.interpolate import interp1d
@@ -97,6 +97,71 @@ def getBondLengths(positions, species, cutoff=3.0, give_species=False):
         
         return bonds
 
+def gl_smear(x, y, xs, gw=None, lw=None, cutoff=10):
+  """ xs, ys = gl_smear(x, y, xs, gw=None, lw=None,cutoff=10)
+    
+  Using a set of reference values given by x and y, create a spectrum ys
+  over the range xs by applying a Gaussian/Lorentzian smearing algorithm:
+  
+  ys(xs) = sum(x) [y(x) * {gaussian(x-xs, gw) + lorentzian(x-xs, lw)}]
+  
+  The gw and lw parameters are the width characteristic for the gaussian
+  and lorentzian respectively. If gw or lw is None, a dynamic smearing will
+  be used:
+  
+  gw(xs[i]) = 0.25 * (xs[i+1] - xs[i-1])
+  
+  The cutoff parameter can be used to set a low-pass filter on the y data - if
+  y > cutoff, it won't be contributed to the spectrum.
+  
+  """
+  
+  # Constants to speed up function evaluation
+  g_pre = 1.0 / sqrt(2 * pi)
+  l_pre = 1.0 / pi
+  
+  # Need some functions here
+  def gaussian(p,w):
+    return g_pre / w * exp(-0.5 * (p ** 2) /  (w ** 2))
+    
+  def lorentzian(p,w):
+    return l_pre * w / (p ** 2 + w ** 2)
+    
+  ys = zeros((len(xs)))
+  dg = []
+  dl = []
+  
+  # Set smearing width
+  if gw is None:
+    for i in range(len(xs)):
+      if i == 0:
+        dg.append(abs(0.5 * (xs[1] - xs[0])))
+      elif i == len(xs) - 1:
+        dg.append(abs(0.5 * (xs[-1] - xs[-2])))
+      else:
+        dg.append(abs(0.25 * (xs[i+1] - xs[i-1])))
+  else:
+    dg = [gw] * len(xs)
+    
+  if lw is None:
+    for i in range(len(xs)):
+      if i == 0:
+        dl.append(abs(0.5 * (xs[1] - xs[0])))
+      elif i == len(xs) - 1:
+        dl.append(abs(0.5 * (xs[-1] - xs[-2])))
+      else:
+        dl.append(abs(0.25 * (xs[i+1] - xs[i-1])))
+  else:
+    dl = [lw] * len(xs)
+    
+  # Calculate combined smeared function
+  for i, xsi in enumerate(xs):
+    for xi,yi in zip(x,y):
+      if yi < cutoff:
+        ys[i] = ys[i] + yi * (gaussian(xsi - xi, dg[i]) + lorentzian(xsi - xi, dl[i]))
+  
+  return ys
+    
 def rotate_positions(positions, filename, fileopt=0):
   """ new_positions = rotate_positions(positions, filename, fileopt=0)
     
@@ -1339,6 +1404,13 @@ class Atom:
         for column in range(1, row+1):
           self.Dij0[row - 1, column - 1] = self.data[self.iDij0]['data'][(row  - 1 + (row -1 )** 2) / 2 + column - 1]
           self.Rhoij0[row - 1, column - 1] = self.data[self.iRhoij0]['data'][(row - 1 + (row - 1) ** 2) / 2 + column - 1]
+          
+    # Make interpolators for the radial data so we don't need to construct
+    # them every time we need them.
+    self.interpolators = {}
+    for i, d in enumerate(self.data):
+      if d['mesh index'] != -1:
+        self.interpolators[i] = interp1d(self.mesh[d['mesh index'] - 1], d['data'])
     
   def radial2Cart(self, data_index, r, r0):
     """ psi = Atom.radial2Cart(data_index, r, r0)
@@ -1361,28 +1433,38 @@ class Atom:
       print "Requested data does not represent a radial function."
       return None
     else:
-      ur = self.data[data_index]['data']
-      rr = self.mesh[self.data[data_index]['mesh index'] - 1]
-      u = interp1d(rr, ur)
+      #ur = self.data[data_index]['data']
+      #rr = self.mesh[self.data[data_index]['mesh index'] - 1]
+      u = self.interpolators[data_index]
       
       # Use the title of the data to figure out which orbital
       # this is (hence the angular momentum)
       
-      l = self.orbitals[int(self.data[data_index]['title'].split()[-1])-1]
+    l = self.orbitals[int(self.data[data_index]['title'].split()[-1])-1]
     
     # Get the spherical coordinates of our displacement vector  
     s = r - r0
     rho = norm(s)
-    theta = arccos(s[2]/rho)
-    phi = arctan2(s[1], s[0])
+    # Need a different treatment if rho == 0.
+    if rho > 0:
+      theta = arccos(s[2]/rho)
+      phi = arctan2(s[1], s[0])
     
-    # We aren't doing this in the presence of a magnetic field
-    # so we can just use m=0 for our spherical harmonic.
-    
-    return u(rho) / rho * sph_harm(0,l,theta,phi)
+      # We aren't doing this in the presence of a magnetic field
+      # so we can just use m=0 for our spherical harmonic.
+      return u(rho) / rho * sph_harm(0,l,theta,phi)
+      
+    else:
+      theta = 0.0
+      phi = arctan2(s[1],s[0]) # Doesn't really matter what this is
+      
+      # Use a 3rd order polynomial fit to points close to the origin to extrapolate.
+      y = [u(x)/x for x in [0.001, 0.002, 0.003]]
+      z = polyfit([0.001, 0.002, 0.003], y, 3)
+      return poly1d(z)(0.0) * sph_harm(0,l,theta,phi)
     
   def expandOntoGrid(self, data_index, ngrid, avec, r0):
-    """ grid = Atom.expandOntoGrid(ngrid, avec, r0)
+    """ grid = Atom.expandOntoGrid(, data_index, ngrid, avec, r0)
     
     Expand the specified dataset onto a grid with grid
     dimensions ngrid and unit vectors avec[i]/ngrid[i]. 
@@ -1396,13 +1478,13 @@ class Atom:
     for i in range(ngrid[0]):
       for j in range(ngrid[1]):
         for k in range(ngrid[2]):
-          r = i/ngrid[0] * avec[0] + j/ngrid[1] * avec[1] + k/ngrid[2] * avec[2]
+          r = (1.0 * i) /ngrid[0] * avec[0] + (1.0 * j)/ngrid[1] * avec[1] + (1.0 * k)/ngrid[2] * avec[2]
           grid[i,j,k] = self.radial2Cart(data_index, r, r0)
     
     # Renormalize.
-    inorm = integrate_grids(grid,grid)
-    return grid/sqrt(inorm)
-              
+    #inorm = integrate_grids(grid,grid)
+    #return grid/sqrt(inorm)
+    return grid         
         
 class Atoms:
     """ Atoms class: a collection of atoms (possibly with a crystal structure)
