@@ -297,6 +297,9 @@ def read_xy(filename, comment_delim="#"):
   
   Reads a multi-column xy file, remove comments, returns as an array
   
+  NOTE: This is redundant now that numpy has a loadtxt() method: should replace
+  all instances with loadtxt.
+  
   """
   
   f = open(filename, 'r')
@@ -929,6 +932,56 @@ def write_xsf(filename, positions, species, lattice=None, letter_spec=True):
         
     f.close()
     return True
+    
+def write_castep(filename, positions, species, lattice, xtype="ang",timestep=0):
+  """ succeeded = write_castep(filename, positions, species=None, xtype="bohr", timestep=0)
+  
+  Writes a CASTEP .cell file using the passed positions. Unlike the abinit case,
+  species must NOT be None here. Options for xtype are "ang", "bohr" or "frac".
+  We assume, as always, that EVERYTHING internal is in atomic units, so a 
+  conversion is performed if "frac" is specified using the passed lattice
+  vectors. Also, if fractional output is specified, the lattice vectors
+  are output in angstroms, the CASTEP default length unit.
+  
+  """
+  
+  pos = positions[timestep]
+  avec = lattice[timestep]
+  spec = species[timestep]
+  
+  # Do conversions if necessary.
+  if xtype == "ang":
+    pos = bohr2ang(pos)
+    avec = bohr2ang(avec)
+  elif xtype == "frac":
+    pos = cart2reduced(pos,avec)
+    avec = bohr2ang(avec)
+  
+  f = open(filename, 'w')
+  
+  f.write("%block lattice_cart\n")
+  if xtype == "bohr":
+    f.write("  bohr\n")
+  for v in avec:
+    f.write("  %010e %010e %010e\n" % (v[0], v[1], v[2]))
+  f.write("%endblock lattice_cart\n")
+  f.write("\n")
+  if xtype == "frac":
+    f.write("%block positions_frac\n")
+  else:
+    f.write("%block positions_abs\n")
+    if xtype == "bohr":
+      f.write("  bohr\n")
+  for s, p in zip(spec, pos):
+    f.write("  %s %010e %010e %010e\n" % (elements[s], p[0], p[1], p[2]))
+  if xtype == "frac":
+    f.write("%endblock positions_frac\n")
+  else:
+    f.write("%endblock positions_abs\n")
+  
+  f.close()
+  return True
+  
 
 def write_abinit(filename, positions, species=None, xtype="bohr", timestep=0):
     """ succeeded = write_abinit(filename, positions, species=None, xtype="ang", timestep=0)
@@ -1542,9 +1595,13 @@ class Atoms:
         
         "elk" : Elk input file.
         
+        "castep" : CASTEP .cell file.
+        
         "NetCDF" : Abinit NetCDF output. Note: this importer is not very clever
         and will put in default values for the species if they cannot be found -
         default is all atoms are carbon.
+        
+        "ETSF" : Read from ETSF-formatted NetCDF output.
         
         """
         
@@ -1562,10 +1619,127 @@ class Atoms:
             self.loadFromNetCDF(filename)
         elif filetype == "ETSF":
             self.loadFromETSF(filename)
+        elif filetype == "castep":
+            self.loadFromCastep(filename)
         else:
           print "(esc_lib.Atoms.__init__) ERROR: File type %s not handled at present." % filetype
           return None
+    
+    def loadFromCastep(self, filename):
+      """ atoms = Atoms.loadFromCASTEP(filename)
+      
+      Internal, inits an Atoms object from a CASTEP .cell file. Note that
+      we don't handle a lot of units here: specifically, we check for the
+      presence of an explicit units line but only convert for angstrom or bohr.
+      
+      We try to handle as much of the input file flexibility as possible:
+      statements such as positions_frac and positionsfrac and PositionsFRAC and
+      so on are all recognized, and we remove comments and blanks before the
+      parse so they don't get in the way. We also allow the assignment variants
+      kpoint_mp_grid=1 1 1 or kpoint_mp_grid: 1 1 1 or kpoint_mp_grid 1 1 1.
+      
+      TODO: The lattice_abc block.
+      
+      """
+      
+      self.clean()
+      f = open(filename, 'r')
+      data = f.readlines()
+      f.close()
+      
+      # Strip away all comments and end of line comments.
+      data = remove_comments(data, "!")
+      
+      # CASTEP is case-independent so we should be too.
+      data = [s.lower() for s in data]
+      
+      if DEBUG:
+        for i, line in enumerate(data):
+          print i, line 
+      
+      # Line-by-line parse
+      i = 0
+      postype = "None"
+      while i < len(data):
+        line = data[i]
+        if line.split()[0] == "%block":
+          btitle =  line.split()[1]
+          btitle = "".join(btitle.split("_"))
+          if DEBUG:
+            print "Found block: ", btitle
+          if btitle == "latticecart":
+            # Either three or four lines in this block.
+            if data[i+4].split()[0] == "%endblock":
+              # No units, assume angstrom.
+              vec1 = array([float(x) for x in data[i+1].split()])
+              vec2 = array([float(x) for x in data[i+2].split()])
+              vec3 = array([float(x) for x in data[i+3].split()])
+              self.lattice.append(ang2bohr([vec1, vec2, vec3]))
+              i = i + 4
+            elif data[i+5].split()[0] == "%endblock":
+              units = data[i+1].split()[0].lower()
+              vec1 = array([float(x) for x in data[i+2].split()])
+              vec2 = array([float(x) for x in data[i+3].split()])
+              vec3 = array([float(x) for x in data[i+4].split()])
+              if units == "ang" or units == "angstrom":
+                self.lattice.append(ang2bohr([vec1, vec2, vec3]))
+              elif units == "bohr":
+                self.lattice.append([vec1, vec2, vec3])
+              i = i + 5
+          elif btitle == "positionsabs":
+            # Loop to the end of this block
+            postype = "absolute"
+            pos = []
+            specs = []
+            unit = "ang"
+            for j in range(i+1,len(data)):
+              if data[j].split()[0] == "%endblock":     
+                i = j
+                break
+              elif len(data[j].split()) == 1:
+                unit = data[j].split()[0].lower()
+              else:
+                specs.append(getElementZ(data[j].split()[0]))
+                pos.append(array([float(s) for s in data[j].split()[1:4]]))
+            if unit == "ang" or unit == "angstrom":
+              self.positions.append(ang2bohr(pos))
+            elif unit == "bohr":
+              self.positions.append(pos)
+            self.species.append(specs)
+          elif btitle == "positionsfrac":
+            # Loop to the end of this block
+            postype = "fractional"
+            pos = []
+            specs = []
+            for j in range(i+1,len(data)):
+              if data[j].split()[0] == "%endblock":            
+                i = j
+                break
+              else:
+                specs.append(getElementZ(data[j].split()[0]))
+                pos.append(array([float(s) for s in data[j].split()[1:4]]))
+            self.species.append(specs)
+        else:
+          # Line is outside a block
+          # Look for "=" or ":"
+          if ":" in line:
+            option = "".join(line.split(":")[0].split("_"))
+            value = line.split(":")[1].strip()
+          elif "=" in line:
+            option = "".join(line.split("=")[0].split("_"))
+            value = line.split("=")[1].strip()
+          else:
+            option = "".join(line.split()[0].split("_"))
+            value = " ".join(line.split()[1:]).strip()
           
+          # Since we don't actually need the values, we just print them.
+          if DEBUG:
+            print "Found option: ", option, " with value ", value
+        i = i + 1
+      
+      if postype == "fractional":
+        self.positions.append(reduced2cart(pos, self.lattice[0]))
+      
     def loadFromETSF(self, filename):
       """ atoms = Atoms.loadFromETSF(filename)
       
@@ -2073,6 +2247,14 @@ class Atoms:
       """
       
       return write_abinit(filename, self.positions, self.species, xtype, timestep)
+
+    def writeCastep(self, filename, xtype="ang", timestep=0):
+      """ success = Atoms.writeCastep(filename, xtype="ang", timestep=0)
       
+      Member function wrapper for esc_lib.write_castep.
+      
+      """
+      
+      return write_castep(filename, self.positions, self.species, self.lattice, xtype, timestep)  
 
             
