@@ -39,14 +39,24 @@
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-
-module io
+module constants
 
   implicit none
   
-  !integer, parameter :: dp = selected_real_kind(15)
-  integer, parameter :: dp = 8 ! see note 2
-  integer, parameter :: DEBUG = 1 ! Set to 1 and recompile to echo outputs.
+  integer, parameter :: dp = 8
+  integer, parameter :: DEBUG=1
+  integer, parameter :: FFTW_FORWARD=-1
+  integer, parameter :: FFTW_BACKWARD=1
+  integer, parameter :: FFTW_ESTIMATE=64
+  
+  
+end module
+    
+module io
+
+  use constants
+  
+  implicit none
     
   !private ! Would like private but f2py can't handle it yet.
   
@@ -66,6 +76,8 @@ module io
   &                                     pspcod, pspdat, pspso, pspxc, so_psp, &
   &                                     symafm, typat
   
+  integer, allocatable, dimension(:,:) :: rhoijselect
+  
   integer, allocatable, dimension(:,:,:) :: symrel
   
   real(kind=dp) :: qptn(3)
@@ -75,6 +87,7 @@ module io
   &                                           znucltypat
   
   real(kind=dp), allocatable, dimension(:,:) :: kptns, tnons, xred
+  real(kind=dp), allocatable, dimension(:,:,:) :: rhoijp
   
   character(len=132), allocatable, dimension(:) :: title
   
@@ -82,8 +95,9 @@ module io
   real(kind=dp), allocatable, dimension(:) :: rhor
   
   ! Wavefunction variables
-  real(kind=dp), allocatable, dimension(:) :: cg, eigen
-  real(kind=dp), allocatable, dimension(:,:) :: kg
+  real(kind=dp), allocatable, dimension(:,:) :: cg
+  real(kind=dp), allocatable, dimension(:) :: eigen
+  integer, allocatable, dimension(:,:,:) :: kg
   integer :: npw
   
     
@@ -123,7 +137,8 @@ module io
     if (allocated(xred)) deallocate(xred)
     if (allocated(title)) deallocate(title)
     if (allocated(eigen)) deallocate(eigen)
-    if (allocated(cg)) deallocate(cg)
+    if (allocated(rhoijselect)) deallocate(rhoijselect)
+    if (allocated(rhoijp)) deallocate(rhoijp)
     
     ! Density
     if (allocated(rhor)) deallocate(rhor)
@@ -160,7 +175,7 @@ module io
         
     ! Local variables
         
-    integer :: ipsp, bsize, lnspden
+    integer :: ipsp, bsize, lnspden, ii, jj, iatom, nselect, ispden
     integer, allocatable, dimension(:) :: ibuffer, nsel
     real(kind=dp), allocatable, dimension(:) :: buffer
         
@@ -175,9 +190,9 @@ module io
     
     ! Read basic variables
     
-    read(funit) bantot, date, intxc, ixc, natom, ngfft(:), nkpt, nspden, &
+    read(funit) bantot, date, intxc, ixc, natom, ngfft, nkpt, nspden, &
     &           nspinor, nsppol, nsym, npsp, ntypat, occopt, pertcase, usepaw, &
-    &           ecut, ecutdg, ecutsm, ecut_eff, qptn(:), rprimd(:,:), stmbias, &
+    &           ecut, ecutdg, ecutsm, ecut_eff, qptn, rprimd, stmbias, &
     &           tphysel, tsmear, usewvl
     
     if (DEBUG .eq. 1) then
@@ -217,9 +232,9 @@ module io
     
     ! Read the non-psp variables
     
-    read(funit) istwfk(:), nband(:), npwarr(:), so_psp(:), symafm(:), &
-    &           symrel(:,:,:), typat(:), kptns(:,:), occ(:), tnons(:,:), &
-    &           znucltypat(:), wtk(:)
+    read(funit) istwfk, nband, npwarr, so_psp, symafm, &
+    &           symrel, typat, kptns, occ, tnons, &
+    &           znucltypat, wtk
     
     ! Read the psp information
     
@@ -230,13 +245,13 @@ module io
     
     ! Final non-PAW record
     
-    read(funit) residm, xred(:,:), etot, fermie
+    read(funit) residm, xred, etot, fermie
     
     ! Set cplex in case we need it later and aren't using PAW.
     cplex = 1
     
-    ! PAW parts of the header. We do not save this - just read to put the file
-    ! pointer past the header.
+    ! PAW parts of the header. We don't actually init a pawrhoij data type
+    ! for each atom here.
     
     if (usepaw==1) then
       allocate(nsel(natom))
@@ -244,7 +259,25 @@ module io
       bsize = sum(nsel)
       allocate(ibuffer(bsize))
       allocate(buffer(bsize * nspden * cplex))
-      read(funit) ibuffer(:), buffer(:)
+      allocate(rhoijselect(natom, maxval(nsel)))
+      allocate(rhoijp(natom, cplex * maxval(nsel), lnspden))
+      if (DEBUG .eq. 1) then
+        print *, "Allocated rhoijselect as size ", natom, maxval(nsel)
+        print *, "Allocated rhoijp as size ", natom, cplex * maxval(nsel), lnspden
+      end if
+      read(funit) ibuffer, buffer
+      ii=0
+      jj=0
+      do iatom=1,natom
+        nselect = nsel(iatom)
+        rhoijselect(iatom,1:nselect) = ibuffer(ii+1:ii+nselect)
+        ii = ii + nselect
+        do ispden=1,lnspden
+          rhoijp(iatom, 1:cplex*nselect, ispden) = buffer(jj+1:jj+cplex*nselect)
+          jj = jj + cplex*nselect
+        end do
+      end do
+      
       deallocate(ibuffer, buffer, nsel)
     end if
     
@@ -278,7 +311,7 @@ module io
     allocate(rhor(cplex * ngfft(1) * ngfft(2) * ngfft(3)))
     
     do ispden=1,nspden
-      read(funit) rhor(:)
+      read(funit) rhor
     end do
   
   end subroutine
@@ -309,14 +342,18 @@ module io
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     
     integer, intent(in) :: funit
-    integer :: isppol, ikpt, ibantot, iband, ii, i, nbandk
+    integer :: isppol, ikpt, ibantot, iband, ii, i, nbandk, ios, ipw
     
-    
-    ! Have to start the loop before allocating because npw is actually in
-    ! the file.
+    ! Allocate our plane wave variables
+    if (.not. allocated(kg)) allocate(kg(3, maxval(npwarr),nkpt))
+    if (.not. allocated(eigen)) allocate(eigen(bantot))
+    if (.not. allocated(occ)) allocate(occ(bantot))
+    if (.not. allocated(cg)) allocate(cg(2, sum(npwarr) * nspinor))
     
     ibantot = 0
     i = 0
+    ipw = 1
+    
     do isppol=1,nsppol
       if (DEBUG .eq. 1) then
         print *, "isppol = ", isppol
@@ -330,22 +367,12 @@ module io
           print *, "npw, nspinor, nbandk"
           print *, npw, nspinor, nbandk
         end if
-        if (.not. allocated(kg)) allocate(kg(3,npw))
-        read(funit) kg(1:3,1:npw)
-        if (DEBUG .eq. 1) then
-          print *, "kg(1:3, 1:npw)"
-          print *, kg(1:3, 1:npw)
-        end if
+        read(funit) kg(1:3,1:npw,ikpt)
         read(funit) eigen(1+ibantot:nbandk+ibantot), &
         & occ(1+ibantot:nbandk+ibantot)
-        if (DEBUG .eq. 1) then
-          print *, "eigen(1+ibantot:nbandk+ibantot), occ(1+ibandtot:etc)"
-          print *, eigen(1+ibantot:nbandk+ibantot), & 
-          & occ(1+ibantot:nbandk+ibantot)
-        end if
-        if (.not. allocated(cg)) allocate(cg(2 * npw * nspinor * nbandk))
         do iband=1,nbandk
-          read(funit) (cg(ii+i), ii=1,2*npw*nspinor)
+          ipw = (iband-1) * npw * nspinor + i
+          read(funit) cg(1:2,ipw+1:ipw+npw*nspinor)
         end do
         ibantot = ibantot + nbandk
         i = i + 2 * npw * nspinor * nbandk
@@ -429,3 +456,103 @@ module io
   end subroutine
   
 end module
+
+module wave
+  
+  ! This module is for things like converting a recip-space WF to real space, computing
+  ! PW expansions, etc.
+  
+  use constants
+  use io
+  
+  implicit none
+  
+  integer :: cband, ckpt
+  complex(kind=dp), allocatable, dimension(:,:,:) :: cwf
+  real(kind=dp) :: ceig, cocc
+  logical :: normalized = .false.
+  integer*8 :: plan
+  
+  contains
+  
+  subroutine recip_to_real(cn, ck, cs, option)
+  
+    integer, intent(in) :: cn, ck, cs, option ! option=1: normalize, 0: don't normalize
+    
+    integer :: isppol, ikpt, npw,ipw, i, j, k, nbandk, iband
+    real(kind=dp), allocatable, dimension(:,:) :: cgnk
+    real(kind=dp) :: gsum
+    
+    ! Find the right range of cg to read given cn, ck and cs.
+    i = 0
+    ipw = 1
+    do isppol=1,nsppol
+      do ikpt=1,nkpt
+        npw = npwarr(ikpt)
+        nbandk = nband(ikpt)
+        do iband=1,nbandk
+          ipw = (iband-1) * npw * nspinor + i
+          if ((ikpt .eq. ck) .and. (iband .eq. cn) .and. (isppol .eq. cs)) then
+            allocate(cgnk(2,npw*nspinor))
+            cgnk = cg(1:2,ipw+1:ipw+npw*nspinor)
+            goto 666
+          end if
+        end do
+        ! Need code here to save the eigenvalue and occupancy.
+        i = i + 2 * npw * nspinor * nbandk
+      end do
+    end do
+
+    ! Now, assign the cgnk to the owf grid in the appropriate place.
+666 npw = npwarr(ck)
+    if (allocated(cwf)) deallocate(cwf)
+    allocate(cwf(ngfft(1), ngfft(2), ngfft(3)))
+    cwf = complex(0.0d0, 0.0d0)
+    do ipw=1,npw
+      i = kg(1,ipw,ck) + int(real(ngfft(1) + 1)/2)
+      j = kg(2,ipw,ck) + int(real(ngfft(2) + 1)/2)
+      k = kg(3,ipw,ck) + int(real(ngfft(3) + 1)/2)
+      cwf(i,j,k) = complex(cgnk(1,ipw+(cs-1)*npw), cgnk(2,ipw+(cs-1)*npw))
+    end do
+    
+    ! FFT cwf to real space.
+    call dfftw_plan_dft_3d(plan,ngfft(1), ngfft(2), ngfft(3), cwf, cwf, FFTW_BACKWARD, FFTW_ESTIMATE)
+    call dfftw_execute_dft(plan, cwf, cwf)
+    call dfftw_destroy_plan(plan)
+    
+    ! If option=1, normalize with respect to the grid sum.
+    if (option .eq. 1) then
+      gsum = 0.0d0
+      do k=1,ngfft(3)
+        do j=1,ngfft(2)
+          do i=1,ngfft(1)
+            gsum = gsum + real(conjg(cwf(i,j,k)) * cwf(i,j,k))
+          end do
+        end do
+      end do
+      cwf = cwf / sqrt(gsum)
+      normalized = .true.
+    else
+      normalized = .false.
+    end if
+  
+  end subroutine
+
+end module
+
+module paw
+
+  ! Stores and manipulates PAW projectors and so on.
+  
+  use constants
+  use io
+  use wave
+  
+  integer :: nmesh, lmax
+  real(kind=dp) :: rmax
+  integer, allocatable, dimension(:) :: mesh_size, mesh_type, orbitals
+  real(kind=dp), allocatable, dimension(:) :: rad_step, log_step
+  
+  implicit none
+  
+  

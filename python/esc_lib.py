@@ -37,7 +37,7 @@ from numpy.linalg import norm, inv
 from numpy.fft import fftn, ifftn
 from scipy.interpolate import interp1d
 from scipy.special import sph_harm
-from libabitools import io
+from libabitools import io, wave
 from Scientific.IO import NetCDF
 
 # Debugging flag - set to 1 to see debug messages.
@@ -1874,20 +1874,25 @@ class Atoms:
          
         self.positions.append(pos)
     
-#    def loadFromAbinitWFK(self, wfk_file):
-#      """ atoms = Atoms.loadFromAbinitWFK(dens_file)
-#      
-#      Internal, inits an Atoms object from a _WFK file written
-#      by abinit.
-##      
-#      """
-#      
-#        self.clean()
-#        
-#        # Libabitools does the work here (fortran library) because
-#        # we're potentially reading in a gigantic file.
-#        
-#        io.wavefunction(wfk_file)
+    def loadFromAbinitWFK(self, wfk_file):
+      """ atoms = Atoms.loadFromAbinitWFK(dens_file)
+     
+      Internal, inits an Atoms object from a _WFK file written
+      by abinit.
+      
+      """
+     
+      self.clean()
+       
+      # Libabitools does the work here (fortran library) because
+      # we're potentially reading in a gigantic file.
+       
+      io.wavefunction(wfk_file)
+      
+      self.lattice = [[array(x) for x in io.rprimd.tolist()]]
+      self.positions = [reduced2cart([array(x) for x in io.xred.T.tolist()], self.lattice[0])]
+      self.species = [[int(io.znucltypat[x-1]) for x in io.typat]]
+      
       
     def loadFromAbinitDensity(self, dens_file):
         """ atoms= Atoms.loadFromAbinitDensity(dens_file)
