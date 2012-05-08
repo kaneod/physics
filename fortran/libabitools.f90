@@ -540,19 +540,19 @@ module wave
 
 end module
 
-module paw
+!module paw
 
   ! Stores and manipulates PAW projectors and so on.
   
-  use constants
-  use io
-  use wave
+!  use constants
+!  use io
+!  use wave
   
-  integer :: nmesh, lmax
-  real(kind=dp) :: rmax
-  integer, allocatable, dimension(:) :: mesh_size, mesh_type, orbitals
-  real(kind=dp), allocatable, dimension(:) :: rad_step, log_step
-  
-  implicit none
+!  integer :: nmesh, lmax
+!  real(kind=dp) :: rmax
+!  integer, allocatable, dimension(:) :: mesh_size, mesh_type, orbitals
+!  real(kind=dp), allocatable, dimension(:) :: rad_step, log_step
+!  
+!  implicit none
   
   

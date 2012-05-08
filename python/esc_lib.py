@@ -1413,7 +1413,11 @@ class Atom:
       if "Dij0" not in chunk["title"] and "Rhoij0" not in chunk["title"]:
         chunk["mesh index"] = int(data[1].split()[0])
         if "VHntZC" in chunk["title"]:
-          self.vloc_format = int(data[1].split()[1]) 
+          try:
+            self.vloc_format = int(data[1].split()[1])
+          except ValueError:
+            # Some PAW files don't specify the vloc_format
+            self.vloc_format = 1 
         elif "Core wave functions" in chunk["title"]:
           chunk["core n"] = int(data[2].split()[0])
           chunk["core l"] = int(data[2].split()[1])
