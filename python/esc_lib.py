@@ -32,7 +32,7 @@
 
 
 from __future__ import division
-from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin, exp, arange, arccos, arctan2, complex, polyfit, poly1d
+from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin, exp, arange, arccos, arctan2, complex, polyfit, poly1d, loadtxt
 from numpy.linalg import norm, inv
 from numpy.fft import fftn, ifftn
 from scipy.interpolate import interp1d
@@ -1276,6 +1276,195 @@ class ESCError(Exception):
         print expr
         print msg
         
+class Spectra:
+  """ Spectra class: designed to deal with common manipulations on
+  spectra output by electronic structure codes like Abinit.
+  
+  Print Spectra.__init__.__doc__ to see the various ways you can
+  construct a Spectra object.
+  
+  """
+  
+  def __init__(self, spectra_type, opt):
+    """ spectra = Spectra(spectra_type, opt)
+    
+    Create a Spectra object. Current options are:
+    
+    1. spectra_type = "conducti_paw_core": in this case, opt is a dictionary
+    with keys "seed name" and "atoms", where opt['seed name'] gives the 
+    conducti output seed name (as specified in conducti.files) and opt['atoms']
+    gives a list of atom numbers to import.
+    
+    Note that for option 1, we must be using a version of abinit with the
+    kaneod edits enabled in conducti_paw_core and optics_paw_core.
+    
+    """
+    
+    if spectra_type == "conducti_paw_core":
+      self.loadConductiPawCore(opt)
+      
+  
+  def loadConductiPawCore(self, opt):
+    """ Spectra.loadConductiPawCore(opt)
+    
+    Internal: inits a Spectra object from Conducti PAW core-level outputs.
+    
+    """
+    
+    self.data = {}
+    self.atoms = opt['atoms']
+    self.spectra_type = "conducti_paw_core"
+      
+    for i in self.atoms:
+      filename = opt['seed name']+str(i)
+      self.data[i] = loadtxt(filename)
+      
+  def spectrumAXYZ(self, atom, evec):
+    """ spectrum = Spectra.spectrumAXYZ(atom, evec)
+    
+    Generates the spectrum for a given electric field direction
+    and atom. Note that this functionality is restricted to
+    certain spectra types - at the moment, the list is:
+    
+    conducti_paw_core
+    
+    The evec vector is normalized before use. The spectrum is returned as a
+    two-column array with the second column the spectrum and the first column
+    the independent variable.
+    
+    """
+    
+    # Check we are allowed to do this
+    if self.spectra_type not in ["conducti_paw_core"]:
+      raise ESCError("spectrumAXYZ", "ERROR: spectrumAXYZ is not defined for this spectrum type.")
+      return None
+      
+    # Normalize evec
+    evec = evec / norm(evec)
+    
+    # Construct spectrum from components
+    cmpts = self.data[atom]
+    spectrum = zeros((cmpts.shape[0],2))
+    
+    for i in range(spectrum.shape[0]):
+      spectrum[i,0] = cmpts[i,0]
+      spectrum[i,1] = evec[0] ** 2 * cmpts[i,1] \
+                    + evec[1] ** 2 * cmpts[i,2] \
+                    + evec[2] ** 2 * cmpts[i,3] \
+                    + evec[0] * evec[1] * cmpts[i,4] \
+                    + evec[0] * evec[2] * cmpts[i,5] \
+                    + evec[1] * evec[2] * cmpts[i,6]
+                    
+    return spectrum
+    
+  def spectrumXYZ(self, evec):
+    """ spectrum = Spectra.spectrumXYZ(evec)
+    
+    Generates the spectrum across all atoms for a given e-field direction.
+    
+    See spectrumAXYZ for more details.
+    
+    """
+    
+    spectrum = zeros((self.data[self.atoms[0]].shape[0], 2))
+    
+    for i in self.atoms:
+      spectrum[:,1] = spectrum[:,1] + self.spectrumAXYZ(i, evec)[:,1]
+    
+    spectrum[:,0] = self.spectrumAXYZ(self.atoms[0],evec)[:,0]
+      
+    return spectrum
+    
+  def spectrumTP(self, theta, phi):
+    """ spectrum = Spectra.spectrumTP(theta,phi)
+    
+    Generates the spectrum across all atoms for a given e-field direction
+    expressed as (theta, phi) in spherical coordinates with theta the polar
+    angle with respect to the original z axis.
+    
+    """
+    
+    spectrum = zeros((self.data[self.atoms[0]].shape[0], 2))
+    
+    for i in self.atoms:
+      spectrum[:,1] = spectrum[:,1] + self.spectrumATP(i, theta,phi)[:,1]
+    
+    spectrum[:,0] = self.spectrumATP(self.atoms[0],theta,phi)[:,0]
+      
+    return spectrum
+    
+  def spectrumComponents(self):
+    """ components = Spectra.spectrumComponents()
+    
+    Returns an array of the same shape as any of the Spectra.data[i]
+    but with the 1:6 components (inclusive) summed over all sets i.
+    
+    """
+    
+    components = zeros(self.data[self.atoms[0]].shape)
+    components[:,0] = self.data[self.atoms[0]][:,0]
+    
+    for a in self.atoms:
+      for i in [1,2,3,4,5,6]:
+        components[:,i] = components[:,i] + self.data[a][:,i]
+    
+    # Note we ignore the 7th column, it's just an arbitary combination
+    # of components set from conducti.
+    
+    components = components[:,0:7] # Cut off the last column
+    return components
+    
+  def writeSpectrumComponents(self,filename):
+    """ succeeded = Spectra.writeSpectrumComponents(filename)
+    
+    Writes out the output of Spectra.spectrumComponents() to disk
+    with the given filename.
+    
+    """
+    
+    f = open(filename, 'w')
+    cmpts = self.spectrumComponents()
+    
+    f.write("# Spectrum components from conducti and esc_lib.py\n")
+    f.write("#\n")
+    f.write("# E XX YY ZZ XY XZ YZ\n")
+    
+    for c in cmpts:
+      f.write("\t".join([str(x) for x in c])+"\n")
+      
+    f.close()
+    
+  
+  def spectrumATP(self, atom, theta, phi):
+    """ spectrum = Spectra.spectrumATP(atom, theta, phi)
+    
+    Generates a spectrum for *EFIELD* angles theta and phi with respect
+    to the coordinate system of the original cell used to compute the 
+    spectrum. Note that these angles are NOT those used in experiments as the 
+    incident light is at right angles to the e-field and the polarization
+    remains a free angle.
+    
+    Here theta is the polar angle (with respect to z axis) and phi is the
+    azimuthal angle in the xy plane.
+    
+    We assume theta and phi are in degrees and do the conversion.
+    
+    """
+    
+    # Check we are allowed to do this
+    if self.spectra_type not in ["conducti_paw_core"]:
+      raise ESCError("spectrumATP", "ERROR: spectrumATP is not defined for this spectrum type.")
+      return None
+    
+    # Convert angles to radians.
+    thetar = pi * theta / 180
+    phir = pi * phi / 180
+    # Construct evector from angles.
+    evec = array([cos(phir) * sin(thetar), sin(phir) * sin(thetar), cos(thetar)])
+    
+    # Use spectrumAXYZ
+    return self.spectrumAXYZ(atom, evec)
+
 class Atom:
   """ Atom class: a single atom, as represented by, for example, a 
   PAW data set.
@@ -2168,11 +2357,65 @@ class Atoms:
         
         return getBondLengths(self.positions[animstep], self.species[animstep], cutoff, give_species)
         
+    def orderAtoms(self, order=None):
+      """ new_order = Atoms.orderAtoms(order=None)
+      
+      Takes the positions and species and reorders them (for example, if the
+      species alternate C, H, C, C, N, H, O, etc, can reorder to C C H H N O) 
+      according to the passed list order. If order is None, the ordering is done
+      by calling uniqify(self.species[0]), the order of the elements in the
+      first timestep.
+      
+      """
+
+      if order is None:
+        my_order = uniqify(self.species[0])
+      else:
+        my_order = uniqify(order)
+              
+      for t in range(len(self.species)):
+        newpos = []
+        newspec = []
+        pos = self.positions[t]
+        spec = self.species[t]
+
+        for o in my_order:
+          for i in range(len(spec)):
+            if getElementZ(spec[i]) == getElementZ(o):
+              newspec.append(spec[i])
+              newpos.append(pos[i])
+        
+        self.positions[t] = newpos
+        self.species[t] = newspec
+        
+      return my_order
+      
+    def listSpecies(self,spec):
+      """ spec_idx = Atoms.printSpecies(spec)
+      
+      Returns a list of indices of all atoms of type spec. Spec can be given
+      as a Z number or an abbreviation (H, Mg, Ca, etc). Note these are zero-
+      based indices that can be used within the Atoms object itself, and not
+      the 1-based atom indices used by Abinit, for example.
+      
+      """
+      
+      spec_idx = []
+      
+      for i in range(len(self.species[0])):
+        if self.species[0][i] == getElementZ(spec):
+          spec_idx.append(i)
+          
+      return spec_idx
+        
     def autoUnLars(self, animstep=0, convtol=0.01, maxsteps=50, cutoff=2.2):
         """ new_pos, pos_hist = Atoms.autoUnLars(animstep=0, convtol=0.01, maxsteps=50, cutoff=2.2)
         
         Attempts to fix positions generated by Lars automatically. This
         might not work very well. Converges positions to convtol.
+        
+        Why? Because Dr Lars Thomsen likes the gunslinging approach to chemical
+        construction. He laughs in the face of the 2nd Law of Thermodynamics.
         
         """
         
