@@ -49,6 +49,8 @@ module constants
   integer, parameter :: FFTW_BACKWARD=1
   integer, parameter :: FFTW_ESTIMATE=64
   
+  double precision, parameter :: pi = 
+  
   
 end module
     
@@ -555,4 +557,37 @@ end module
 !  
 !  implicit none
   
+module spectra
+
+  use constants
   
+  subroutine spectrum_axyz(cmpts, sout, evec, n)
+  
+    ! Faster version of spectrumAXYZ from esc_lib.
+    
+    integer, intent(in) :: n
+    double precision, intent(in) :: cmpts(n,7), evec(3)
+    double precision, intent(out) :: sout(n,2)
+    integer :: i
+    
+    sout = 0.0d0
+    evec = evec / dsqrt(evec(1)**2 + evec(2)**2 + evec(3)**2)
+       
+    do i=1,n
+      sout(i,1) = cmpts(i,1)
+      sout(i,2) = evec(1)**2 * cmpts(i,2) + evec(2)**2 * cmpts(i,3) + &
+      &           evec(3)**2 * cmpts(i,4) + evec(1)*evec(2) * cmpts(i,5) + &
+      &           evec(1)*evec(3) * cmpts(i,6) + evec(2)*evec(3) * cmpts(i,7)
+    end do
+    
+  end subroutine
+  
+  subroutine spectrum_atp(cmpts, sout, theta, phi, n)
+  
+    integer, intent(in) :: n
+    double precision, intent(in) :: cmpts(n,7), theta, phi, tr, pr
+    double precision, intent(out) :: sout(n,2)
+    integer :: i
+    
+    tr =     
+    
