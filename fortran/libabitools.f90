@@ -630,7 +630,10 @@ module spectra
       &           nvec(1)*nvec(3) * cmpts(j,i,6) + &
       &           nvec(2)*nvec(3) * cmpts(j,i,7)
       end do
-    end do        
+    end do
+    
+    ! Divide by the number of atoms.
+    sout(i,2) = sout(i,2) / m  
     
   end subroutine
   

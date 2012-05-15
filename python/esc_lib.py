@@ -1505,6 +1505,7 @@ class Spectra:
       spectrum[:,1] = spectrum[:,1] + self.spectrumTP(rand()*180, rand()*360)[:,1]
     
     spectrum[:,0] = self.cmpts[0,:,0]
+    spectrum[:,1] = spectrum[:,1] / samples
     return spectrum
 
 class Atom:
