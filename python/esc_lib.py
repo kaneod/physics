@@ -33,12 +33,14 @@
 
 from __future__ import division
 from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin, exp, arange, arccos, arctan2, complex, polyfit, poly1d, loadtxt
+from random import random as rand
 from numpy.linalg import norm, inv
 from numpy.fft import fftn, ifftn
 from scipy.interpolate import interp1d
 from scipy.special import sph_harm
-from libabitools import io, wave
-from Scientific.IO import NetCDF
+#from scipy.optimize import minimize
+from libabitools import io, wave, spectra
+#from Scientific.IO import NetCDF
 
 # Debugging flag - set to 1 to see debug messages.
 DEBUG=1
@@ -810,12 +812,15 @@ def chop128(in_string):
     line be less than 132 characters long otherwise it ignores
     the rest of the input.
     
-    NOTE: Not clear if we need to code this yet, waiting for
-    confirmation from abinit devs. For now doesn't do anything.
-    
     """
+    tail =  in_string.split('\n')[-1]
+    head = in_string.split('\n')[:-1]
     
-    return in_string
+    if len(tail) <= 128:
+      return in_string
+    else:
+      return "\n".join(head + [tail[0:128]] + [chop128(tail[128:])])
+      
     
 def write_cube(filename, positions, species, lattice, datagrid, timestep=0):
   """ succeeded = write_cube(filename, positions, species, lattice, datagrid, timestep=0)
@@ -983,7 +988,7 @@ def write_castep(filename, positions, species, lattice, xtype="ang",timestep=0):
   return True
   
 
-def write_abinit(filename, positions, species=None, xtype="bohr", timestep=0):
+def write_abinit(filename, positions, species=None, xtype="bohr", opt=None, timestep=0):
     """ succeeded = write_abinit(filename, positions, species=None, xtype="ang", timestep=0)
     
     Writes the passed positions in a format suitable to be copy and pasted
@@ -994,27 +999,67 @@ def write_abinit(filename, positions, species=None, xtype="bohr", timestep=0):
     One needs to specify a timestep since the positions variable can be animated
     as can the species variable - the default is zero.
     
+    opt is a dictionary of special options. Can have:
+    
+    'special atom' : n (index of a special atom, given a unique label and 
+                    moved to the first position in the atoms list. For use
+                    with conducti/core hole style calculations where the 
+                    first atom is special according to abinit.
+    
     Note: NEED TO ADD xred OUTPUT!
     
     """
     
     pos = positions[timestep]
     
+    # If we have a special atom, have to swap it to position 0.
+    
+    if opt is not None and 'special atom' in opt:
+      n = opt['special atom']
+      pos0 = pos[0]
+      posn = pos[n-1]
+      pos[0] = posn
+      pos[n-1] = pos0
+    
     f = open(filename, 'w')
     
     if species is not None:
         spec = species[timestep]
-        f.write("natom       %d\n" % len(spec))
-        f.write("ntypat      %d\n" % len(uniqify(spec)))
-        f.write("znucl       %s\n" % " ".join([str(x) for x in uniqify(spec)]))
-        # Generate typat string
-        spec_dict = {}
-        typat = []
-        for i,s in enumerate(uniqify(spec)):
-            spec_dict[s] = i+1
-        for s in spec:
-            typat.append(str(spec_dict[s]))
-        f.write("typat       %s\n" % " ".join(typat))
+        # If we have special atom, have to swap it's species to the first pos
+        # and give it a special element type.
+        if opt is not None and 'special atom' in opt:
+          n = opt['special atom']
+          spec0 = spec[0]
+          specn = spec[n-1]
+          spec[0] = specn
+          spec[n-1] = spec0
+          f.write("natom       %d\n" % len(spec))
+          f.write("ntypat      %d\n" % (len(uniqify(spec[1:])) + 1))
+          f.write("znucl       %s\n" % (str(spec[0])+" "+" ".join([str(x) for x in uniqify(spec[1:])])))
+          spec_dict = {}
+          typat = []
+          for i,s in enumerate(uniqify(spec[1:])):
+              spec_dict[s] = i+2
+          for s in spec[1:]:
+              typat.append(str(spec_dict[s]))
+          typatstr = "1 " + " ".join(typat)
+        else:         
+          f.write("natom       %d\n" % len(spec))
+          f.write("ntypat      %d\n" % len(uniqify(spec)))
+          f.write("znucl       %s\n" % " ".join([str(x) for x in uniqify(spec)]))
+          # Generate typat string
+          spec_dict = {}
+          typat = []
+          for i,s in enumerate(uniqify(spec)):
+              spec_dict[s] = i+1
+          for s in spec:
+              typat.append(str(spec_dict[s]))
+          typatstr = " ".join(typat)
+        # Abinit complains if a line in an input file > 132 characters in length
+        # so we break every 100 characters if necessary.
+        if len(typatstr) >= 132:
+          typatstr = chop128(typatstr)
+        f.write("typat       %s\n" % typatstr)
     if xtype == "bohr":
         f.write("xcart\n")
         for p in pos:
@@ -1285,23 +1330,18 @@ class Spectra:
   
   """
   
-  def __init__(self, spectra_type, opt):
-    """ spectra = Spectra(spectra_type, opt)
+  def __init__(self, seed, atoms):
+    """ spectra = Spectra(seed, atoms)
     
-    Create a Spectra object. Current options are:
-    
-    1. spectra_type = "conducti_paw_core": in this case, opt is a dictionary
-    with keys "seed name" and "atoms", where opt['seed name'] gives the 
-    conducti output seed name (as specified in conducti.files) and opt['atoms']
-    gives a list of atom numbers to import.
-    
-    Note that for option 1, we must be using a version of abinit with the
-    kaneod edits enabled in conducti_paw_core and optics_paw_core.
+    Create a Spectra object based on abinit's conducti output. Seed is the 
+    second line of conducti.files, atoms is a list of integers such that the 
+    files read are of the form seedi where i is an element of atoms.
     
     """
     
-    if spectra_type == "conducti_paw_core":
-      self.loadConductiPawCore(opt)
+    opt = {'seed name' : seed, 'atoms' : atoms}
+    
+    self.loadConductiPawCore(opt)
       
   
   def loadConductiPawCore(self, opt):
@@ -1319,6 +1359,13 @@ class Spectra:
       filename = opt['seed name']+str(i)
       self.data[i] = loadtxt(filename)
       
+    # Construct a cmpts array (natoms,npoints,2) from data.
+    
+    self.cmpts = zeros((len(self.atoms), self.data[self.atoms[0]].shape[0],7))
+    
+    for i,a in enumerate(self.atoms):
+      self.cmpts[i,:,:] = self.data[a][:,0:7]
+      
   def spectrumAXYZ(self, atom, evec):
     """ spectrum = Spectra.spectrumAXYZ(atom, evec)
     
@@ -1334,28 +1381,10 @@ class Spectra:
     
     """
     
-    # Check we are allowed to do this
-    if self.spectra_type not in ["conducti_paw_core"]:
-      raise ESCError("spectrumAXYZ", "ERROR: spectrumAXYZ is not defined for this spectrum type.")
-      return None
-      
-    # Normalize evec
-    evec = evec / norm(evec)
-    
     # Construct spectrum from components
     cmpts = self.data[atom]
-    spectrum = zeros((cmpts.shape[0],2))
-    
-    for i in range(spectrum.shape[0]):
-      spectrum[i,0] = cmpts[i,0]
-      spectrum[i,1] = evec[0] ** 2 * cmpts[i,1] \
-                    + evec[1] ** 2 * cmpts[i,2] \
-                    + evec[2] ** 2 * cmpts[i,3] \
-                    + evec[0] * evec[1] * cmpts[i,4] \
-                    + evec[0] * evec[2] * cmpts[i,5] \
-                    + evec[1] * evec[2] * cmpts[i,6]
                     
-    return spectrum
+    return spectra.spectrum_axyz(cmpts, evec)
     
   def spectrumXYZ(self, evec):
     """ spectrum = Spectra.spectrumXYZ(evec)
@@ -1366,14 +1395,7 @@ class Spectra:
     
     """
     
-    spectrum = zeros((self.data[self.atoms[0]].shape[0], 2))
-    
-    for i in self.atoms:
-      spectrum[:,1] = spectrum[:,1] + self.spectrumAXYZ(i, evec)[:,1]
-    
-    spectrum[:,0] = self.spectrumAXYZ(self.atoms[0],evec)[:,0]
-      
-    return spectrum
+    return spectra.spectrum_xyz(self.cmpts, evec)
     
   def spectrumTP(self, theta, phi):
     """ spectrum = Spectra.spectrumTP(theta,phi)
@@ -1384,14 +1406,7 @@ class Spectra:
     
     """
     
-    spectrum = zeros((self.data[self.atoms[0]].shape[0], 2))
-    
-    for i in self.atoms:
-      spectrum[:,1] = spectrum[:,1] + self.spectrumATP(i, theta,phi)[:,1]
-    
-    spectrum[:,0] = self.spectrumATP(self.atoms[0],theta,phi)[:,0]
-      
-    return spectrum
+    return spectra.spectrum_tp(self.cmpts, theta, phi)
     
   def spectrumComponents(self):
     """ components = Spectra.spectrumComponents()
@@ -1451,19 +1466,46 @@ class Spectra:
     
     """
     
-    # Check we are allowed to do this
-    if self.spectra_type not in ["conducti_paw_core"]:
-      raise ESCError("spectrumATP", "ERROR: spectrumATP is not defined for this spectrum type.")
-      return None
+    cmpts = self.data[atom]
+                    
+    return spectra.spectrum_atp(cmpts, theta,phi)
     
-    # Convert angles to radians.
-    thetar = pi * theta / 180
-    phir = pi * phi / 180
-    # Construct evector from angles.
-    evec = array([cos(phir) * sin(thetar), sin(phir) * sin(thetar), cos(thetar)])
+  def optimizePeak(self,peak, maximize=True):
+    """ fit_result = Spectra.optimizePeak(peak)
     
-    # Use spectrumAXYZ
-    return self.spectrumAXYZ(atom, evec)
+    Finds the theta,phi that maximizes the given peak. Alternatively if
+    maximize=False, we minimize instead. We return the output of the
+    scipy.optimize minimize method.
+    
+    """
+    
+    i = spectra.closest_index_to_energy(self.cmpts[0,:,0],peak)
+    if maximize:
+      s = -1.0
+    else:
+      s = 1.0
+      
+    def optfunc(p):
+      return s * spectra.spectrum_tp(self.cmpts,p[0],p[1])[i,1]
+      
+    return minimize(optfunc,[rand()*180,rand()*360])
+  
+  def spectrumRandom(self, samples=1000):
+    """ spectrum = Spectra.spectrumRandom(samples=1000)
+    
+    Uses random numbers to generate angles for theta and phi, and sums
+    over the spectra generated for each random angle. Optionally set
+    samples to decide how many random angle sets are used.
+    
+    """
+    
+    spectrum = zeros((self.cmpts.shape[1], 2))
+    
+    for i in range(samples):
+      spectrum[:,1] = spectrum[:,1] + self.spectrumTP(rand()*180, rand()*360)[:,1]
+    
+    spectrum[:,0] = self.cmpts[0,:,0]
+    return spectrum
 
 class Atom:
   """ Atom class: a single atom, as represented by, for example, a 
@@ -2491,14 +2533,14 @@ class Atoms:
       
       return write_xsf(filename, self.positions, self.species, self.lattice)
       
-    def writeAbinit(self, filename, xtype="ang", timestep=0):
-      """ success = Atoms.writeAbinit(filename, xtype="ang", timestep=0)
+    def writeAbinit(self, filename, xtype="ang", opt=None, timestep=0):
+      """ success = Atoms.writeAbinit(filename, xtype="ang", opt=None, timestep=0)
       
       Member function wrapper for esc_lib.write_abinit.
       
       """
       
-      return write_abinit(filename, self.positions, self.species, xtype, timestep)
+      return write_abinit(filename, self.positions, self.species, xtype, opt, timestep)
 
     def writeCastep(self, filename, xtype="ang", timestep=0):
       """ success = Atoms.writeCastep(filename, xtype="ang", timestep=0)

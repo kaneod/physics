@@ -49,7 +49,7 @@ module constants
   integer, parameter :: FFTW_BACKWARD=1
   integer, parameter :: FFTW_ESTIMATE=64
   
-  double precision, parameter :: pi = 
+  double precision, parameter :: pi = 4.0d0 * datan(1.0d0)
   
   
 end module
@@ -561,6 +561,10 @@ module spectra
 
   use constants
   
+  implicit none
+  
+  contains
+  
   subroutine spectrum_axyz(cmpts, sout, evec, n)
   
     ! Faster version of spectrumAXYZ from esc_lib.
@@ -569,15 +573,16 @@ module spectra
     double precision, intent(in) :: cmpts(n,7), evec(3)
     double precision, intent(out) :: sout(n,2)
     integer :: i
+    double precision :: nvec(3)
     
     sout = 0.0d0
-    evec = evec / dsqrt(evec(1)**2 + evec(2)**2 + evec(3)**2)
+    nvec = evec / dsqrt(evec(1)**2 + evec(2)**2 + evec(3)**2)
        
     do i=1,n
       sout(i,1) = cmpts(i,1)
-      sout(i,2) = evec(1)**2 * cmpts(i,2) + evec(2)**2 * cmpts(i,3) + &
-      &           evec(3)**2 * cmpts(i,4) + evec(1)*evec(2) * cmpts(i,5) + &
-      &           evec(1)*evec(3) * cmpts(i,6) + evec(2)*evec(3) * cmpts(i,7)
+      sout(i,2) = nvec(1)**2 * cmpts(i,2) + nvec(2)**2 * cmpts(i,3) + &
+      &           nvec(3)**2 * cmpts(i,4) + nvec(1)*nvec(2) * cmpts(i,5) + &
+      &           nvec(1)*nvec(3) * cmpts(i,6) + nvec(2)*nvec(3) * cmpts(i,7)
     end do
     
   end subroutine
@@ -585,9 +590,90 @@ module spectra
   subroutine spectrum_atp(cmpts, sout, theta, phi, n)
   
     integer, intent(in) :: n
-    double precision, intent(in) :: cmpts(n,7), theta, phi, tr, pr
+    double precision, intent(in) :: cmpts(n,7), theta, phi
     double precision, intent(out) :: sout(n,2)
     integer :: i
+    double precision :: evec(3), tr, pr
     
-    tr =     
+    tr = pi * theta / 180.0d0
+    pr = pi * phi / 180.0d0
     
+    evec(1) = dcos(pr) * dsin(tr)
+    evec(2) = dsin(pr) * dsin(tr)
+    evec(3) = dcos(tr)
+    
+    call spectrum_axyz(cmpts, sout, evec, n)
+    
+  end subroutine
+  
+  subroutine spectrum_xyz(cmpts, sout, evec, n, m)
+  
+    ! In this version, cmpts has 3 slots (the first is for the atom).
+    
+    integer, intent(in) :: n, m
+    double precision, intent(in) :: cmpts(m,n,7), evec(3)
+    double precision, intent(out) :: sout(n,2)
+    integer :: i,j
+    double precision :: nvec(3)
+    
+    sout = 0.0d0
+    nvec = evec / dsqrt(evec(1)**2 + evec(2)**2 + evec(3)**2)
+    
+    do i=1,n
+      sout(i,1) = cmpts(1,i,1)
+    end do
+       
+    do i=1,n
+      do j=1,m
+      sout(i,2) = nvec(1)**2 * cmpts(j,i,2) + nvec(2)**2 * cmpts(j,i,3) + &
+      &           nvec(3)**2 * cmpts(j,i,4) + nvec(1)*nvec(2) * cmpts(j,i,5) + &
+      &           nvec(1)*nvec(3) * cmpts(j,i,6) + &
+      &           nvec(2)*nvec(3) * cmpts(j,i,7)
+      end do
+    end do        
+    
+  end subroutine
+  
+  subroutine spectrum_tp(cmpts, sout, theta, phi, n, m)
+  
+    integer, intent(in) :: n, m
+    double precision, intent(in) :: cmpts(m,n,7), theta, phi
+    double precision, intent(out) :: sout(n,2)
+    integer :: i
+    double precision :: evec(3), tr, pr
+    
+    tr = pi * theta / 180.0d0
+    pr = pi * phi / 180.0d0
+    
+    evec(1) = dcos(pr) * dsin(tr)
+    evec(2) = dsin(pr) * dsin(tr)
+    evec(3) = dcos(tr)
+    
+    call spectrum_xyz(cmpts, sout, evec, n,m)
+    
+  end subroutine
+  
+  integer function closest_index_to_energy(energy_array, energy, n)
+  
+    ! Returns the index i_closest such that energy_array(i_closest) is the 
+    ! best match to energy.
+    
+    integer, intent(in) :: n
+    double precision, intent(in) :: energy_array(n), energy
+    integer :: i
+    double precision :: emin
+    
+    closest_index_to_energy = 0
+    emin = 1.0d10 ! something ridiculously huge to start
+    
+    do i=1,n
+      if (dabs(energy_array(i) - energy).lt.emin) then
+        closest_index_to_energy = i
+        emin = dabs(energy_array(i) - energy)
+      end if
+    end do
+    
+    return
+    
+  end function
+end module
