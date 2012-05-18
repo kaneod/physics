@@ -38,6 +38,7 @@ from numpy.linalg import norm, inv
 from numpy.fft import fftn, ifftn
 from scipy.interpolate import interp1d
 from scipy.special import sph_harm
+from scipy.optimize import leastsq
 #from scipy.optimize import minimize
 from libabitools import io, wave, spectra
 #from Scientific.IO import NetCDF
@@ -1507,7 +1508,91 @@ class Spectra:
     spectrum[:,0] = self.cmpts[0,:,0]
     spectrum[:,1] = spectrum[:,1] / samples
     return spectrum
-
+    
+  def bestFitToExperiment(self, exp_data, energy_range=None, energy_offset=0.0):
+    """ theta, phi, I0, data = Spectra.bestFitToExperiment(exp_data, energy_range=None, energy_offset=0.0)
+    
+    Takes an experimental spectrum (Nx2-shaped array, first column is energy,
+    second column is intensity) and perform a least squares fit over 
+    the specified energy range. If the energy range is omitted (or None), 
+    the whole range of the computed data is used. Note that the experimental
+    data is interpolated and set to zero outside the experimental energy range.
+    
+    The energy_offset parameter can be used to impose a rigid x-axis shift of
+    the computed values before fitting. If None, the optimal x-axis shift is
+    computed as a fitting parameter. By default the shift is 0.0, not None.
+    
+    Note that we do *not* do unit conversions here, these must be accounted
+    for before entry into the routine. The data output is a Nx3 array, first 
+    column is the energy scale, second is the experimental and third is the 
+    fitted computed data.
+    
+    """
+    
+    if energy_range is None:
+      estart = 0
+      eend = self.cmpts.shape[1]
+    else:
+      estart = spectra.closest_index_to_energy(self.cmpts[0,:,0], energy_range[0])
+      eend = spectra.closest_index_to_energy(self.cmpts[0,:,0], energy_range[1])
+    
+    if DEBUG:
+      print "Fitting computational data between indices %d and %d." % (estart, eend)  
+    y = interp1d(exp_data[:,0], exp_data[:,1], bounds_error=False, fill_value=0.0)
+    
+    # Construct interpolated experimental values depending on energy_offset,
+    # then define the residue function.
+    
+    if energy_offset is None:
+      # Much slower because we have to construct yexp at each function step
+      def fitfunc(p):
+        # p[0] = theta, p[1] = phi, p[2] = I0, p[3] = E0 shift.
+        yexp = array([y(x-p[3]) for x in self.cmpts[0,:,0]])
+        spec = spectra.spectrum_tp(self.cmpts, p[0],p[1])
+        return p[2] * spec[:,1] - yexp
+      r = leastsq(fitfunc, [45.0,45.0, 1000.0, 0.1], full_output=1)
+      cdat = spectra.spectrum_tp(self.cmpts, r[0][0], r[0][1])
+      cdat[:,0] = cdat[:,0] - r[0][3]
+      cdat[:,1] = r[0][2] * cdat[:,1]
+      data = zeros((cdat.shape[0], 3))
+      data[:,0] = cdat[:,0]
+      data[:,1] = array([y(x) for x in self.cmpts[0,:,0]])
+      data[:,2] = cdat[:,1]
+      return r[0][0], r[0][1],r[0][2], data
+    else:
+      yexp = array([y(x-energy_offset) for x in self.cmpts[0,:,0]])
+      def fitfunc(p):
+        # p[0] = theta, p[1] = phi, p[2] = I0
+        spec = spectra.spectrum_tp(self.cmpts, p[0],p[1])
+        return p[2] * spec[:,1] - yexp
+      r = leastsq(fitfunc, [45.0, 45.0, 1000], full_output=1)
+      cdat = spectra.spectrum_tp(self.cmpts, r[0][0], r[0][1])
+      cdat[:,0] = cdat[:,0] - energy_offset
+      cdat[:,1] = r[0][2] * cdat[:,1]
+      data = zeros((cdat.shape[0], 3))
+      data[:,0] = cdat[:,0]
+      data[:,1] = array([y(x-energy_offset) for x in self.cmpts[0,:,0]])
+      data[:,2] = cdat[:,1]
+      return r[0][0], r[0][1],r[0][2], data
+    
+  def bestFitToFile(self, filename, energy_range=None,exp_offset=0.0, comp_offset=0.0):
+    """ theta, phi, I0, data = Spectra.bestFitToFile(filename, energy_range=None, energy_offset=0.0)
+    
+    Same as bestFitToExperiment but loads automatically from a file. The
+    pretty safe assumption here is that the experimental energy axis is in eV
+    whereas the stored spectra here are all in Hartree, so the spectra are
+    returned in Hartree. There are two offsets allowed, with exp_offset applied
+    to the X-axis of the experimental data and assumed to be in eV, and
+    comp_offset passed directly to bestFitToExperiment.
+    
+    """
+    
+    # Load experimental data, offset and convert to Ha.
+    expdat = loadtxt(filename)
+    expdat[:,0] = eV2hartree(expdat[:,0] - exp_offset)
+    
+    return self.bestFitToExperiment(expdat, energy_range, comp_offset)
+    
 class Atom:
   """ Atom class: a single atom, as represented by, for example, a 
   PAW data set.
