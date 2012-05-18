@@ -1564,7 +1564,7 @@ class Spectra:
       def fitfunc(p):
         # p[0] = theta, p[1] = phi, p[2] = I0
         spec = spectra.spectrum_tp(self.cmpts, p[0],p[1])
-        return p[2] * spec[:,1] - yexp
+        return (p[2] * spec[:,1] - yexp)**4
       r = leastsq(fitfunc, [45.0, 45.0, 1000], full_output=1)
       cdat = spectra.spectrum_tp(self.cmpts, r[0][0], r[0][1])
       cdat[:,0] = cdat[:,0] - energy_offset
