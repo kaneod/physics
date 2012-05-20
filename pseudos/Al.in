@@ -1,0 +1,29 @@
+Al 13
+GGA-PBE loggrid 2001 logderivrange -30 40 2000
+3 3 0 0 0 0 
+3 1 1 
+0 0 0 
+c 
+v 
+v 
+v 
+v 
+1
+1.6
+y
+0
+n
+y
+0
+n
+custom polynom2 7 10
+2 0 ultrasoft
+1.6
+1.6
+1.6
+1.6
+1.6
+1.6
+2
+prtcorewf noxcnhat nospline noptim
+0

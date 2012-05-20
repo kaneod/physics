@@ -42,6 +42,7 @@ from scipy.optimize import leastsq
 #from scipy.optimize import minimize
 from libabitools import io, wave, spectra
 #from Scientific.IO import NetCDF
+from scipy.io import netcdf
 
 # Debugging flag - set to 1 to see debug messages.
 DEBUG=1
@@ -2071,9 +2072,9 @@ class Atoms:
       
       self.clean()
       
-      f = NetCDF.NetCDFFile(filename, 'r')
-      pos = [array(x) for x in f.variables['reduced_atom_positions'][:]]
-      avec = [array(x) for x in f.variables['primitive_vectors'][:]]
+      f = netcdf.netcdf_file(filename, 'r')
+      pos = [array(x) for x in f.variables['reduced_atom_positions'].data]
+      avec = [array(x) for x in f.variables['primitive_vectors'].data]
       
       self.positions.append(reduced2cart(pos,avec))
       self.lattice.append(avec)
@@ -2086,8 +2087,8 @@ class Atoms:
       
       # Generate G-vectors (we need them for WF calculations)
       #self.g_vectors, self.g_coords,self.max_g = g_vectors(self.recip_lattice[0],self.ngrid)     
-      znucl = f.variables['atomic_numbers'][:]
-      self.species = [[int(znucl[x-1]) for x in f.variables['atom_species'][:]]]
+      znucl = f.variables['atomic_numbers'].data
+      self.species = [[int(znucl[x-1]) for x in f.variables['atom_species'].data]]
       self.filehook = f
             
     def loadFromNetCDF(self, filename):
@@ -2106,13 +2107,13 @@ class Atoms:
       
       self.clean()
       
-      f = NetCDF.NetCDFFile(filename, 'r')
+      f = netcdf.netcdf_file(filename, 'r')
 
-      self.nsteps = len(f.variables['mdtime'].getValue())
-      if DEBUG: print self.nsteps, f.variables['mdtime'].getValue()   
-      xcart = f.variables['xcart'].getValue()
-      rprimd = f.variables['rprimd'].getValue()
-      fcart = f.variables['fcart'].getValue()
+      self.nsteps = len(f.variables['mdtime'].data)
+      if DEBUG: print self.nsteps, f.variables['mdtime'].data  
+      xcart = f.variables['xcart'].data
+      rprimd = f.variables['rprimd'].data
+      fcart = f.variables['fcart'].data
       natom = f.dimensions['natom']
       
       for i in range(self.nsteps):
