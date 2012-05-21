@@ -49,7 +49,7 @@ DEBUG=1
 
 # Element dictionaries
 
-elements = { 1 : "H", 2 : "He", 3 : "Li",  4 : "Be", 5 : "B", 6 : "C", 7 : "N" , 8 : "O", 29 : "Cu" }
+elements = { 1 : "H", 2 : "He", 3 : "Li",  4 : "Be", 5 : "B", 6 : "C", 7 : "N" , 8 : "O", 29 : "Cu", 13 : "Al" }
 xsf_keywords = ["ANIMSTEPS", "CRYSTAL", "ATOMS", "PRIMVEC", "PRIMCOORD"]
 bond_lengths = {"CH" : 2.06, "CC" : 2.91, "NC" : 2.78, "NH" : 1.91, "HH" : 2.27}
 
@@ -2281,6 +2281,8 @@ class Atoms:
         if type(znucl) == type(1):
             znucl = [znucl]
         typat = abinit_int(data, "typat", n)
+        if type(typat) == type(1):
+          typat = [typat]
         
         # Double brackets because species, positions, etc are all timestep-friendly.
         self.species = [[znucl[x-1] for x in typat]]
