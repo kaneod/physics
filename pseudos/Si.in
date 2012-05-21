@@ -1,0 +1,29 @@
+Si 14
+GGA-PBE scalarrelativistic loggrid 2001 logderivrange -30 40 2001
+3 3 0 0 0 0 
+3 1 2 
+0 0 0 
+c 
+v 
+v 
+v 
+v 
+1
+1.5
+y
+0.0
+n 
+y
+0.0
+n 
+custom polynom2 7 10   
+2 0 ultrasoft
+1.5
+1.5
+1.5
+1.5
+1.5
+1.5
+2
+prtcorewf usexcnhat nospline noptim
+0
