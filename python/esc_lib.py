@@ -319,8 +319,33 @@ def read_xy(filename, comment_delim="#"):
       
   return data
   
-def read_seq_xy(filename, comment_delim="#", option="None"):
-  """ data = read_seq_xy(filename, comment_delim="#")
+def sum_atoms(data, start, finish, option="LeaveFirstColumn"):
+  """ summed_data = sum_atoms(data, start, finish)
+  
+  Assuming an array of the format data[i,j,k], sum over the range in i
+  and return an array in the other two indices. 
+  
+  Option "LeaveFirstColumn" prevents summing over the first column and simply
+  copies the first set of values (for i = start). 
+  
+  """
+  
+  s = zeros((data.shape[1],data.shape[2]))
+  
+  if option == "LeaveFirstColumn":
+    cs = 1
+    s[:,0] = data[start,:,0]
+  else:
+    cs = 0
+    
+  for i in range(start,finish):
+    s[:,cs:] = s[:,cs:] + data[i,:,cs:]
+    
+  return s
+  
+  
+def read_seq_xy(filename, comment_delim="#", option=None):
+  """ data = read_seq_xy(filename, comment_delim="#", option=None)
   
   Reads xy files where the individual data sets are listed in two columns
   sequentially. We assume (but don't check) that all the sets are the same
@@ -333,8 +358,7 @@ def read_seq_xy(filename, comment_delim="#", option="None"):
   
   Note that we can accommodate blank lines separating the sets.
   
-  If option="elnes", we assume a CASTEP .elnes output with the line formatting
-  bug, we correct for this.
+  If option="castep_elnes" we correct for the silly output format and "k" is 4.
   
   """
   
@@ -360,19 +384,19 @@ def read_seq_xy(filename, comment_delim="#", option="None"):
     data_blocks.append(cur_block)
   
   data_blocks = array(data_blocks)
-  # If option="elnes", need to reshape.
-  if option == "elnes":
-    points = data_blocks.shape[1]
-    data = zeros((data_blocks.shape[0], points / 2, 4))
+  
+  if option=="castep_elnes":
+    npoints = data_blocks.shape[1]
+    data = zeros((data_blocks.shape[0], npoints/2, 4))
     for i in range(data_blocks.shape[0]):
-      data[i,:,0] = data_blocks[i,0:points:2,0]
-      data[i,:,1] = data_blocks[i,0:points:2,1]
-      data[i,:,2] = data_blocks[i,1:points:2,0]
-      data[i,:,3] = data_blocks[i,1:points:2,1]
+      data[i,:,0] = data_blocks[i,0:npoints:2,0]
+      data[i,:,1] = data_blocks[i,0:npoints:2,1]
+      data[i,:,2] = data_blocks[i,1:npoints:2,0]
+      data[i,:,3] = data_blocks[i,1:npoints:2,1]
     
     return data
-  else:    
-    return data_blocks
+  else:
+    return array(data_blocks)
   
 def read_ACF(filename):
   """ charges, total_charge = read_ACF(filename)
@@ -421,6 +445,43 @@ def remove_comments(lines, comment_delim="#",just_blanks=False):
           stripped.append(line.partition(comment_delim)[0].strip())
     
     return stripped
+    
+def castep_read_bands(filename):
+  """ bands, properties = castep_read_bands(filename)
+  
+  Reads in the SEED.bands from CASTEP and returns as an array. Also reads
+  in some of the key properties, such as the number of bands, number of electrons,
+  fermi level.
+  
+  """
+  
+  f = open(filename, 'r')
+  
+  lines = f.readlines()
+  nkpts = int(lines[0].split()[3])
+  nspins = int(lines[1].split()[4])
+  nelectrons = float(lines[2].split()[3])
+  nbands = int(lines[3].split()[3])
+  efermi = float(lines[4].split()[5])
+  data = lines[9:]
+  
+  bands = []
+  
+  for k in range(nkpts):
+    for s in range(nspins):
+      data = data[2:]
+      tmp = data[0:nbands]
+      bands.append(array([float(x.strip()) for x in tmp]))
+      
+  props = {}
+  
+  props["nbands"] = nbands
+  props["nkpts"] = nkpts
+  props["nspins"] = nspins
+  props["efermi"] = efermi
+  props["nelectrons"] = nelectrons
+  
+  return bands, props
 
 def elk_parse_bands(filename):
   """ path, bands = elk_parse_bands(filename="BAND.OUT")
