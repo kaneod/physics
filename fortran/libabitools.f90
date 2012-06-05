@@ -344,17 +344,21 @@ module io
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     
     integer, intent(in) :: funit
-    integer :: isppol, ikpt, ibantot, iband, ii, i, nbandk, ios, ipw
+    integer :: isppol, ikpt, ibantot, iband, ii, i, nbandk, ios, ipw, ncg
     
     ! Allocate our plane wave variables
     if (.not. allocated(kg)) allocate(kg(3, maxval(npwarr),nkpt))
     if (.not. allocated(eigen)) allocate(eigen(bantot))
     if (.not. allocated(occ)) allocate(occ(bantot))
-    if (.not. allocated(cg)) allocate(cg(2, sum(npwarr) * nspinor))
+    if (.not. allocated(cg)) allocate(cg(2, maxval(npwarr) * nsppol * maxval(nband) * nspinor * nkpt))
     
     ibantot = 0
     i = 0
     ipw = 1
+    
+    if (DEBUG .eq. 1) then
+      print *, "mpw, mband = ", maxval(npwarr), maxval(nband)
+    end if
     
     do isppol=1,nsppol
       if (DEBUG .eq. 1) then
@@ -377,9 +381,17 @@ module io
           read(funit) cg(1:2,ipw+1:ipw+npw*nspinor)
         end do
         ibantot = ibantot + nbandk
-        i = i + 2 * npw * nspinor * nbandk
+        i = i + npw * nspinor * nbandk
       end do
     end do
+    
+    if (DEBUG .eq. 1) then
+      print *, "Total size of cg is: ", maxval(npwarr) * nsppol * maxval(nband) * nspinor * nkpt
+      print *, "Final i is: ", i
+      print *, "Final ipw is: ", ipw
+      print *, "Final ibantot is: ", ibantot
+      print *, "cg shape is: ", shape(cg)
+    end if
     
   end subroutine
   

@@ -319,7 +319,7 @@ def read_xy(filename, comment_delim="#"):
       
   return data
   
-def read_seq_xy(filename, comment_delim="#"):
+def read_seq_xy(filename, comment_delim="#", option="None"):
   """ data = read_seq_xy(filename, comment_delim="#")
   
   Reads xy files where the individual data sets are listed in two columns
@@ -332,6 +332,9 @@ def read_seq_xy(filename, comment_delim="#"):
   columns of data, so 0 is the x axis, 1 is the y1 axis etc.
   
   Note that we can accommodate blank lines separating the sets.
+  
+  If option="elnes", we assume a CASTEP .elnes output with the line formatting
+  bug, we correct for this.
   
   """
   
@@ -355,8 +358,21 @@ def read_seq_xy(filename, comment_delim="#"):
       
   if cur_block != []:
     data_blocks.append(cur_block)
-      
-  return array(data_blocks)
+  
+  data_blocks = array(data_blocks)
+  # If option="elnes", need to reshape.
+  if option == "elnes":
+    points = data_blocks.shape[1]
+    data = zeros((data_blocks.shape[0], points / 2, 4))
+    for i in range(data_blocks.shape[0]):
+      data[i,:,0] = data_blocks[i,0:points:2,0]
+      data[i,:,1] = data_blocks[i,0:points:2,1]
+      data[i,:,2] = data_blocks[i,1:points:2,0]
+      data[i,:,3] = data_blocks[i,1:points:2,1]
+    
+    return data
+  else:    
+    return data_blocks
   
 def read_ACF(filename):
   """ charges, total_charge = read_ACF(filename)
@@ -1565,7 +1581,7 @@ class Spectra:
       def fitfunc(p):
         # p[0] = theta, p[1] = phi, p[2] = I0
         spec = spectra.spectrum_tp(self.cmpts, p[0],p[1])
-        return (p[2] * spec[:,1] - yexp)**4
+        return (p[2] * spec[:,1] - yexp)
       r = leastsq(fitfunc, [45.0, 45.0, 1000], full_output=1)
       cdat = spectra.spectrum_tp(self.cmpts, r[0][0], r[0][1])
       cdat[:,0] = cdat[:,0] - energy_offset
