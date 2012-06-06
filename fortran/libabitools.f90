@@ -376,8 +376,14 @@ module io
         read(funit) kg(1:3,1:npw,ikpt)
         read(funit) eigen(1+ibantot:nbandk+ibantot), &
         & occ(1+ibantot:nbandk+ibantot)
+        if (DEBUG .eq. 1) then
+          print *, "Got past kg, eigen and occ read."
+        end if
         do iband=1,nbandk
           ipw = (iband-1) * npw * nspinor + i
+          if (DEBUG .eq. 1) then
+            print *, "Trying to read ", npw*nspinor, " values with ipw = ", ipw
+          end if
           read(funit) cg(1:2,ipw+1:ipw+npw*nspinor)
         end do
         ibantot = ibantot + nbandk
