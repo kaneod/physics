@@ -41,8 +41,8 @@ from scipy.special import sph_harm
 from scipy.optimize import leastsq
 #from scipy.optimize import minimize
 from libabitools import io, wave, spectra
-#from Scientific.IO import NetCDF
 from scipy.io import netcdf
+import os
 
 # Debugging flag - set to 1 to see debug messages.
 DEBUG=1
@@ -117,6 +117,9 @@ def gl_smear(x, y, xs, gw=None, lw=None, cutoff=10):
   
   The cutoff parameter can be used to set a low-pass filter on the y data - if
   y > cutoff, it won't be contributed to the spectrum.
+  
+  NOTE: This gl_smear is incorrect - needs a weighting factor between the gaussian
+  and lorentzian to maintain normalization (amongst other things). 
   
   """
   
@@ -1422,24 +1425,69 @@ class Spectra:
   
   """
   
-  def __init__(self, seed, atoms):
+  def __init__(self, seed, atoms,source):
     """ spectra = Spectra(seed, atoms)
     
-    Create a Spectra object based on abinit's conducti output. Seed is the 
-    second line of conducti.files, atoms is a list of integers such that the 
-    files read are of the form seedi where i is an element of atoms.
+    Create a Spectra object. For conducti output, use source="conducti". For 
+    nexspec output, use source="nexspec". Should also add conventional CASTEP
+    ELNES task output here (will be source="castep"). 
+    
+    For nexspec output, set atoms to a number indicating the species you want to
+    read in. For conducti output, atoms should be a range (indicating the 1-based atom
+    indices from the original abinit input file.
     
     """
     
-    opt = {'seed name' : seed, 'atoms' : atoms}
-    
-    self.loadConductiPawCore(opt)
+    if source == "conducti":
+      opt = {'seed name' : seed, 'atoms' : atoms}
+      self.loadConductiPawCore(opt)
+    elif source == "nexspec":
+      self.loadNexspec(seed, atoms)
       
-  
+  def loadNexspec(self, seed, species):
+    """ Spectra.loadNexspec(seed, species)
+    
+    Internal: inits a Spectra object from nexspec output based on the CASTEP ELNES
+    task.
+    
+    NOTE: We can't yet deal with the situation where there are multiple core level
+    spectra per atom (ie, 1s, 2s, 2p levels and so on). The current algorithm only
+    stores the highest nlm-combination or whatever comes last as listed by listdir.
+    
+    """
+    
+    self.data = {}
+    self.atoms=[]
+    
+    # Cycle over the contents of the directory containing the nexspec .nexafs outputs
+    # and pick out/load the files starting with seed_atoms
+    head,tail = os.path.split(seed)
+    if head is "":
+      # We are in the current directory
+      files = os.listdir(os.getcwd())
+    else:
+      files = os.listdir(head)
+    
+    for filename in files:
+      if filename.startswith(seed+"_"+str(species)) and filename.endswith(".nexafs"):
+        self.atoms.append(int(filename.split("_")[2]))
+        self.data[int(filename.split("_")[2])] = loadtxt(filename)
+    
+    self.cmpts = zeros((len(self.atoms), self.data[self.atoms[0]].shape[0],7))
+    
+    for i,a in enumerate(self.atoms):
+      # Now: we have to stick to our rule of always storing and dealing in Hartree
+      # atomic units. The nexspec output is in eV, so convert.
+      self.data[a][:,0] = eV2hartree(self.data[a][:,0])
+      self.cmpts[i,:,:] = self.data[a][:,0:7]
+    
   def loadConductiPawCore(self, opt):
     """ Spectra.loadConductiPawCore(opt)
     
     Internal: inits a Spectra object from Conducti PAW core-level outputs.
+    
+    Note: We can't deal with multiple core-levels in the same file (yet). These will
+    be ignored in the read.
     
     """
     
@@ -1462,10 +1510,7 @@ class Spectra:
     """ spectrum = Spectra.spectrumAXYZ(atom, evec)
     
     Generates the spectrum for a given electric field direction
-    and atom. Note that this functionality is restricted to
-    certain spectra types - at the moment, the list is:
-    
-    conducti_paw_core
+    and atom.
     
     The evec vector is normalized before use. The spectrum is returned as a
     two-column array with the second column the spectrum and the first column
@@ -1515,7 +1560,7 @@ class Spectra:
       for i in [1,2,3,4,5,6]:
         components[:,i] = components[:,i] + self.data[a][:,i]
     
-    # Note we ignore the 7th column, it's just an arbitary combination
+    # Note we ignore the 7th column from conducti, it's just an arbitary combination
     # of components set from conducti.
     
     components = components[:,0:7] # Cut off the last column

@@ -640,10 +640,10 @@ module spectra
     do i=1,n
       sout(i,1) = cmpts(1,i,1)
     end do
-       
+    
     do i=1,n
       do j=1,m
-      sout(i,2) = nvec(1)**2 * cmpts(j,i,2) + nvec(2)**2 * cmpts(j,i,3) + &
+      sout(i,2) = sout(i,2) + nvec(1)**2 * cmpts(j,i,2) + nvec(2)**2 * cmpts(j,i,3) + &
       &           nvec(3)**2 * cmpts(j,i,4) + nvec(1)*nvec(2) * cmpts(j,i,5) + &
       &           nvec(1)*nvec(3) * cmpts(j,i,6) + &
       &           nvec(2)*nvec(3) * cmpts(j,i,7)
@@ -651,7 +651,7 @@ module spectra
     end do
     
     ! Divide by the number of atoms.
-    sout(i,2) = sout(i,2) / m  
+    sout(1:n,2) = sout(1:n,2) / m  
     
   end subroutine
   
