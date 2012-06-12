@@ -1017,8 +1017,8 @@ def write_xsf(filename, positions, species, lattice=None, letter_spec=True):
     f.close()
     return True
     
-def write_castep(filename, positions, species, lattice, xtype="ang",timestep=0):
-  """ succeeded = write_castep(filename, positions, species=None, xtype="bohr", timestep=0)
+def write_castep(filename, positions, species, lattice, xtype="ang", opt=None, timestep=0):
+  """ succeeded = write_castep(filename, positions, species=None, xtype="bohr", opt=None, timestep=0)
   
   Writes a CASTEP .cell file using the passed positions. Unlike the abinit case,
   species must NOT be None here. Options for xtype are "ang", "bohr" or "frac".
@@ -1026,6 +1026,13 @@ def write_castep(filename, positions, species, lattice, xtype="ang",timestep=0):
   conversion is performed if "frac" is specified using the passed lattice
   vectors. Also, if fractional output is specified, the lattice vectors
   are output in angstroms, the CASTEP default length unit.
+  
+  opt is a dictionary that gives output options. Options are:
+  
+  'special atom' : n - index of atom that is special. Will have "spec" appended
+                      to the Z number in the positions_abs/frac block so that
+                      you can specify a separate species_pot pseudopotential
+                      generation string or PSP file.
   
   """
   
@@ -1056,8 +1063,14 @@ def write_castep(filename, positions, species, lattice, xtype="ang",timestep=0):
     f.write("%block positions_abs\n")
     if xtype == "bohr":
       f.write("  bohr\n")
-  for s, p in zip(spec, pos):
-    f.write("  %s %010e %010e %010e\n" % (elements[s], p[0], p[1], p[2]))
+  for i, (s, p) in enumerate(zip(spec, pos)):
+    if "special atom" in opt.keys():
+      if opt["special atom"] == i:
+        f.write("  %s %010e %010e %010e\n" % (elements[s]+"spec", p[0], p[1], p[2]))
+      else:
+        f.write("  %s %010e %010e %010e\n" % (elements[s], p[0], p[1], p[2]))
+    else:
+      f.write("  %s %010e %010e %010e\n" % (elements[s], p[0], p[1], p[2]))
   if xtype == "frac":
     f.write("%endblock positions_frac\n")
   else:
@@ -2708,13 +2721,13 @@ class Atoms:
       
       return write_abinit(filename, self.positions, self.species, xtype, opt, timestep)
 
-    def writeCastep(self, filename, xtype="ang", timestep=0):
-      """ success = Atoms.writeCastep(filename, xtype="ang", timestep=0)
+    def writeCastep(self, filename, xtype="ang", opt=None, timestep=0):
+      """ success = Atoms.writeCastep(filename, xtype="ang", opt=None, timestep=0)
       
       Member function wrapper for esc_lib.write_castep.
       
       """
       
-      return write_castep(filename, self.positions, self.species, self.lattice, xtype, timestep)  
+      return write_castep(filename, self.positions, self.species, self.lattice, xtype, opt, timestep)  
 
             
