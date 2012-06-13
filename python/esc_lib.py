@@ -1032,7 +1032,7 @@ def write_castep(filename, positions, species, lattice, xtype="ang", opt=None, t
   
   opt is a dictionary that gives output options. Options are:
   
-  'special atom' : n - index of atom that is special. Will have "spec" appended
+  'special atom' : n - index of atom that is special. Will have ":special" appended
                       to the Z number in the positions_abs/frac block so that
                       you can specify a separate species_pot pseudopotential
                       generation string or PSP file.
@@ -1067,9 +1067,9 @@ def write_castep(filename, positions, species, lattice, xtype="ang", opt=None, t
     if xtype == "bohr":
       f.write("  bohr\n")
   for i, (s, p) in enumerate(zip(spec, pos)):
-    if "special atom" in opt.keys():
-      if opt["special atom"] == i:
-        f.write("  %s %010e %010e %010e\n" % (elements[s]+"spec", p[0], p[1], p[2]))
+    if opt is not None and 'special atom' in opt:
+      if opt["special atom"] == i+1:
+        f.write("  %s %010e %010e %010e\n" % (elements[s]+":special", p[0], p[1], p[2]))
       else:
         f.write("  %s %010e %010e %010e\n" % (elements[s], p[0], p[1], p[2]))
     else:
