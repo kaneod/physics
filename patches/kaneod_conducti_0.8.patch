@@ -1,0 +1,304 @@
+diff -aruN abinit-6.12.3/src/67_common/conducti_paw_core.F90 abinit-kaneod/src/67_common/conducti_paw_core.F90
+--- abinit-6.12.3/src/67_common/conducti_paw_core.F90	2012-04-11 15:17:38.000000000 +1000
++++ abinit-kaneod/src/67_common/conducti_paw_core.F90	2012-06-13 16:03:22.092205983 +1000
+@@ -23,11 +23,14 @@
+ !!
+ !! NOTES
+ !!  bantot
+-!!  dom=frequency range
++!!  dom=size of smearing.
++!!  domopt=0 for lorentzian, 1 for gaussian.
++!!  omin=generated frequency spectrum starts at -energy_core + omin - 1.
++!!  omax=generated frequency spectrum stops at -energy_core + omax - 1.
+ !!  eigen0(mband*nkpt_rbz*nsppol)=GS eigenvalues at k (hartree).
+ !!  ecut=kinetic energy planewave cutoff (hartree).
+-!!  fermie= fermi energy (Hartree)
+-!!  mom=number of frequency for conductivity computation
++!!  fermie= fermi energy (Hartree).
++!!  mom=number of frequency steps between omin and omax.
+ !!  mband=maximum number of bands.
+ !!  natom = number of atoms in the unit cell.
+ !!  nband(nkpt*nsppol)=number of bands at each RF k point for each spin.
+@@ -89,27 +92,28 @@
+ 
+ !Local variables-------------------------------
+ !scalars
+- integer :: accesswff,atnbr,bantot,bdtot0_index,bdtot_index
+- integer :: fform0,fform2,formeig0,headform,iatom,iband,icor,ierr,ikpt
++ integer :: accesswff,atnbr,bantot,bdtot0_index,bdtot_index, conducti_mode
++ integer :: fform0,fform2,formeig0,headform,iatom,iband,icor,ierr,ikpt,domopt
+  integer :: iom,isppol,l1,master,mband,me,mom
+  integer :: natom,nband1,nband_k,nkpt,nphicor,nspinor,nsppol,ntypat
+  integer :: occopt,rdwr,spaceComm,tim_rwwf
+  real(dp) :: del,diff_occ,ecut,fermie
+- real(dp) :: omin,omax,dom,oml
++ real(dp) :: omin,omax,dom,oml,exyz(3)
+  real(dp) :: Tatm,tsmear,ucvol
+  character(len=fnlen) :: filnam0,filnam2,filnam_gen
++ character(len=80) :: atstr
+  character(len=6) :: codvsn
+  type(hdr_type) :: hdr
+  type(wffile_type) :: wff0,wff2
+ !arrays
+  integer,allocatable :: nband(:),ncor(:),lcor(:)
+  real(dp) :: gmet(3,3),gprimd(3,3),rmet(3,3),rprimd(3,3)
+- real(dp),allocatable :: dhdk2_g(:,:,:)
++ real(dp),allocatable :: dhdk2_g(:,:,:,:)
+  real(dp),allocatable :: eig0_k(:),eig0tmp(:),eigen0(:)
+  real(dp),allocatable :: eigtmp(:),energy_cor(:)
+  real(dp),allocatable :: occ(:),occ_k(:),oml1(:)
+  real(dp),allocatable :: psinablapsi2(:,:,:,:,:)
+- real(dp),allocatable :: sigx(:,:,:),sigx_av(:,:),wtk(:)
++ real(dp),allocatable :: sigx(:,:,:,:),sigx_av_at(:,:,:),sigx_av(:,:),wtk(:)
+ 
+ ! *********************************************************************************
+ !BEGIN EXECUTABLE SECTION
+@@ -121,19 +125,37 @@
+ !Read data file
+  open(15,file=filnam,form='formatted')
+  rewind(15)
+- read(15,*)
++ read(15,*) conducti_mode
+  read(15,'(a)')filnam_gen       ! generic name for the files
+  filnam2=trim(filnam_gen)//'_OPT2'
+-!Read size of the frequency range
+- read(15,*) dom,omin,omax,mom,atnbr
++!Read size of the frequency range and other parameters.
++! If conducti_mode=7 we use the extended features.
++ if (conducti_mode .eq. 5) then
++   read(15,*) dom,omin,omax,mom,atnbr
++   exyz(1) = 1.0d0
++   exyz(2) = 1.0d0
++   exyz(3) = 1.0d0
++   write(std_out,'(a,i8,3f10.5,a)')' npts,omin,omax,width      =',mom,omin,omax,dom,' Ha'
++   write(std_out,'(a)')'--------------------------------------------'
++   write(std_out,'(a,i4)') 'selected atom for spectro X',atnbr
++   write(std_out,'(a)')'--------------------------------------------'
++ else if (conducti_mode .eq. 7) then
++   read(15,*) dom,omin,omax,mom,domopt
++   read(15,*) exyz(3)
++   write(std_out,'(a,i8,3f10.5,a)')' npts,omin,omax,width      =',mom,omin,omax,dom,' Ha'
++   write(std_out,'(a)')'--------------------------------------------'
++   if (domopt .eq. 0) then
++     write(std_out,'(a,f10.5,a)') ' Chose Lorentzian smearing with width = ', dom, ' Ha'
++   else
++     write(std_out,'(a,f10.5,a)') ' Chose Gaussian smearing with width = ', dom, ' Ha'
++   end if
++   write(std_out,'(a)')'--------------------------------------------'
++ end if
++ 
+  close(15)
+ 
+- write(std_out,'(a,i8,3f10.5,a)')' npts,omin,omax,width      =',mom,omin,omax,dom,' Ha'
+- write(std_out,'(a)')'--------------------------------------------'
+- write(std_out,'(a,i4)') 'selected atom for spectro X',atnbr
+- write(std_out,'(a)')'--------------------------------------------'
+-
+-
++! Make sure exyz is normalized
++ exyz = exyz / dsqrt(exyz(1)**2 + exyz(2)**2 + exyz(3)**2)
+ 
+ !Open the Wavefunction and optic files
+ !These default values are typical of sequential use
+@@ -240,14 +262,16 @@
+    oml1(iom)=omin+dble(iom-1)*del
+  end do
+ 
+- ABI_ALLOCATE(sigx,(natom,mom,nphicor))
++ ABI_ALLOCATE(sigx,(6,natom,mom,nphicor))
+  ABI_ALLOCATE(sigx_av,(mom,nphicor))
++ ABI_ALLOCATE(sigx_av_at,(natom,mom,nphicor))
+ !---------------------------------------------------------------------------------
+ !SpectroX  -------
+ !
+  ABI_ALLOCATE(psinablapsi2,(2,3,mband,nphicor,natom))
+  sigx=zero
+  sigx_av=zero
++ sigx_av_at=zero
+  bdtot_index = 0
+ 
+ !LOOP OVER SPINS
+@@ -258,7 +282,7 @@
+      nband_k=nband(ikpt+(isppol-1)*nkpt)
+      ABI_ALLOCATE(eig0_k,(nband_k))
+      ABI_ALLOCATE(occ_k,(nband_k))
+-     ABI_ALLOCATE(dhdk2_g,(natom,nband_k,nphicor))
++     ABI_ALLOCATE(dhdk2_g,(6,natom,nband_k,nphicor))
+ 
+      dhdk2_g   = zero
+      psinablapsi2=zero
+@@ -281,19 +305,70 @@
+        do iband=1,nband_k
+          do icor=1,nphicor
+ 
+-           do l1=1,3
+-             dhdk2_g(iatom,iband,icor)=dhdk2_g(iatom,iband,icor)+( &
+-&             psinablapsi2(1,l1,iband,icor,iatom)*psinablapsi2(1,l1,iband,icor,iatom) &
+-&             +psinablapsi2(2,l1,iband,icor,iatom)*psinablapsi2(2,l1,iband,icor,iatom))
+-           end do
++! EDIT: kaneod - this section has been modified to correctly calculate
++! the full optical tensor for each final state. Using Einstein summation and the
++! notation Mij = <c|nabla_i|f><f|nabla_j|c>, the proper matrix element M for
++! electric polarization E (components Ei) is EiEjMij with Mji = conj(Mij). Using
++! the full tensor allows the calculation of the spectrum expected for an
++! arbitrary electric field direction - necessary for fitting to non-isotropic
++! NEXAFS/XANES spectra.
++! NOTE: Since Mji = conj(Mij), we only need six components of the matrix - here
++! we compute the diagonal plus the real part of the upper triangle. 
++! We can then reconstruct the spectrum for any Ei using
++! M(E) = Ex^2 * Mxx + Ey^2 * Myy + Ez^2 * Mzz + Ex * Ey * 2 * Re(Mxy) +
++! Ey * Ez * 2 * Re(Myz) + Ex * Ez * 2 * Re(Mxz)
++
++!           do l1=1,3
++!             dhdk2_g(iatom,iband,icor)=dhdk2_g(iatom,iband,icor)+( &
++!&             psinablapsi2(1,l1,iband,icor,iatom)*psinablapsi2(1,l1,iband,icor,iatom) &
++!&             +psinablapsi2(2,l1,iband,icor,iatom)*psinablapsi2(2,l1,iband,icor,iatom))
++!           end do
+            
++           !! Mxx = <c|nabla_x|f><f|nabla_x|c>
++           dhdk2_g(1,iatom,iband,icor)= ( &
++&           psinablapsi2(1,1,iband,icor,iatom)*psinablapsi2(1,1,iband,icor,iatom) &
++&           +psinablapsi2(2,1,iband,icor,iatom)*psinablapsi2(2,1,iband,icor,iatom))           
++
++           !! Myy = <c|nabla_y|f><f|nabla_y|c>
++           dhdk2_g(2,iatom,iband,icor)= ( &
++&           psinablapsi2(1,2,iband,icor,iatom)*psinablapsi2(1,2,iband,icor,iatom) &
++&           +psinablapsi2(2,2,iband,icor,iatom)*psinablapsi2(2,2,iband,icor,iatom))
++
++           !! Mzz = <c|nabla_z|f><f|nabla_z|c>
++           dhdk2_g(3,iatom,iband,icor)= ( &
++&           psinablapsi2(1,3,iband,icor,iatom)*psinablapsi2(1,3,iband,icor,iatom) &
++&           +psinablapsi2(2,3,iband,icor,iatom)*psinablapsi2(2,3,iband,icor,iatom))
++
++           !! 2 * Re(Mxy) = 2 * Re(<c|nabla_x|f><f|nabla_y|c>)
++           dhdk2_g(4,iatom,iband,icor)= 2.0d0*( &
++&           psinablapsi2(1,1,iband,icor,iatom)*psinablapsi2(1,2,iband,icor,iatom) &
++&           +psinablapsi2(2,1,iband,icor,iatom)*psinablapsi2(2,2,iband,icor,iatom))   
++
++           !! 2 * Re(Mxz) = 2 * Re(<c|nabla_x|f><f|nabla_z|c>)
++           dhdk2_g(5,iatom,iband,icor)= 2.0d0*( &
++&           psinablapsi2(1,1,iband,icor,iatom)*psinablapsi2(1,3,iband,icor,iatom) &
++&           +psinablapsi2(2,1,iband,icor,iatom)*psinablapsi2(2,3,iband,icor,iatom)) 
++
++           !! 2 * Re(Myz) = 2 * Re(<c|nabla_y|f><f|nabla_z|c>)
++           dhdk2_g(6,iatom,iband,icor)= 2.0d0*( &
++&           psinablapsi2(1,2,iband,icor,iatom)*psinablapsi2(1,3,iband,icor,iatom) &
++&           +psinablapsi2(2,2,iband,icor,iatom)*psinablapsi2(2,3,iband,icor,iatom))
++
+            diff_occ = (two/dble(nsppol))-occ_k(iband)
+ !          Spectro for each omega
+            omin = -1.0
+            do iom=1,mom
+              oml=-energy_cor(icor)+oml1(iom)+omin 
+-             sigx(iatom,iom,icor)=sigx(iatom,iom,icor)+ wtk(ikpt)*dhdk2_g(iatom,iband,icor)&
+-&             *(diff_occ)/oml*dexp(-((-energy_cor(icor)+eig0_k(iband)-oml)/dom)**2)        
++             do l1=1,6
++               if (domopt.eq.0) then
++                 ! Lorentzian smearing
++                 sigx(l1,iatom,iom,icor)=sigx(l1,iatom,iom,icor)+ wtk(ikpt)*dhdk2_g(l1,iatom,iband,icor)&
++&             *(diff_occ)*(dom / (pi*(-energy_cor(icor)+eig0_k(iband)-oml)**2 + dom**2))
++               else
++                 sigx(l1,iatom,iom,icor)=sigx(l1,iatom,iom,icor)+ wtk(ikpt)*dhdk2_g(l1,iatom,iband,icor)&
++&             *(diff_occ)*(1.0d0/(dom*dsqrt(two_pi)) * dexp(-half*((-energy_cor(icor)+eig0_k(iband)-oml)/dom)**2))
++               end if
++             end do     
+            end do
+          end do !icor
+        end do  !iband
+@@ -311,33 +386,75 @@
+  do iatom=1,natom
+    do icor=1,nphicor
+      do iom=1,mom
+-       if(sigx(iatom,iom,icor)<=tol16) sigx(iatom,iom,icor)=zero
++       do l1=1,6
++         if(abs(sigx(l1,iatom,iom,icor))<=tol16) sigx(l1,iatom,iom,icor)=zero
++       end do
+      end do
+    end do 
+  end do ! iatom
+ 
+- sigx=sigx*two_pi*third*dble(natom)/(dom*ucvol)*half/dsqrt(pi)
++ !! EDIT: kaneod - we use the definition from Joachim Stohr's textbook for the
++ ! adsorption cross section, divided by ucvol. Need to check this for the proper
++ ! factors!
++ do iom=1,mom
++  oml=-energy_cor(icor)+oml1(iom)+omin
++  sigx(1:6,1:natom,iom,1:nphicor)=sigx(1:6,1:natom,iom,1:nphicor)*(two_pi)**2*InvFineStruct/(ucvol*oml)
++ end do
+ 
++ !! EDIT: kaneod - for conducti_mode 5 (original), sigx_av_at is just the average 
++ ! spectrum, ie, the sum for the magic angle. For conducti_mode 7, the sum is 
++ ! for the requested E field direction.
+  do icor=1,nphicor
+    do iom=1,mom
+      do iatom=1,natom
+-       sigx_av(iom,icor) =sigx_av(iom,icor)+sigx(iatom,iom,icor)/dble(natom)
++       sigx_av_at(iatom,iom,icor) =sigx_av_at(iatom,iom,icor)+ &
++&             exyz(1) * exyz(1) * sigx(1,iatom,iom,icor) + &
++&             exyz(2) * exyz(2) * sigx(2,iatom,iom,icor) + &
++&             exyz(3) * exyz(3) * sigx(3,iatom,iom,icor) + &
++&             exyz(1) * exyz(2) * sigx(4,iatom,iom,icor) + &
++&             exyz(1) * exyz(3) * sigx(5,iatom,iom,icor) + &
++&             exyz(2) * exyz(3) * sigx(6,iatom,iom,icor)
++       sigx_av(iom,icor) = sigx_av(iom,icor) + sigx_av_at(iatom,iom,icor)
+      end do
+    end do
+  end do 
+ 
+- open(31,file=trim(filnam_out)//'_sigX',form='formatted')
+- do iom=1,mom
+-   write(31,'(9(1x,e14.8))') &
+-&   ((-energy_cor(icor)+oml1(iom)+omin),sigx_av(iom,icor),sigx(atnbr,iom,icor),icor=1,nphicor)
+- end do
++!! EDIT: kaneod - for conducti_mode 5 (original), we output only one file
++! with three columns: the energy, the average spectrum, and the spectrum
++! for the specified atom atnbr. Note that in heteroatomic systems the average
++! spectrum will not be meaningful.
++ if (conducti_mode .eq. 5) then
++   open(31,file=trim(filnam_out)//'_sigX',form='formatted')
++   write(31,'(a)') '# NEXAFS core-level spectrum calculated using conducti, option 5.'
++   write(31,'(a)') '# '
++   write(31,'(a)') '# Omega (Ha) [sigx_av sigx(atnbr)] [] repeated for the number of core levels'
++   do iom=1,mom
++     write(31,'(9(1x,e14.8))') &
++&     ((-energy_cor(icor)+oml1(iom)+omin),sigx_av(iom,icor),sigx_av_at(atnbr,iom,icor),icor=1,nphicor)
++   end do
++   close(31)
++ else if (conducti_mode .eq. 7) then
++   atstr=''
++   do iatom=1,natom
++     write(atstr, '(I5)') iatom
++     open(31,file=trim(filnam_out)//'_sigX_'//trim(adjustl(atstr)),form='formatted')
++     write(31,'(a)') '# NEXAFS core-level spectrum calculated using conducti, option 6.'
++     write(31,'(a)') '# '
++     write(31,'(a)') '# Omega (Ha) [Mxx Myy Mzz Mxy Mxz Myz sigx(Omega)] [] repeated for number of core levels'
++     do iom=1,mom
++       write(31,'(9(1x,e14.8))') &
++&       ((-energy_cor(icor)+oml1(iom)+omin),sigx(1:6,iatom,iom,icor),sigx_av_at(iatom,iom,icor),icor=1,nphicor)
++     end do
++     close(31)
++   end do
++ end if
+ 
+  ABI_DEALLOCATE(sigx)
+  ABI_DEALLOCATE(sigx_av)
++ ABI_DEALLOCATE(sigx_av_at)
+  ABI_DEALLOCATE(ncor)
+  ABI_DEALLOCATE(lcor)
+  ABI_DEALLOCATE(energy_cor)
+- close(31)
+  call WffClose(wff2,ierr)
+  
+  ABI_DEALLOCATE(eigen0)
+diff -aruN abinit-6.12.3/src/98_main/conducti.F90 abinit-kaneod/src/98_main/conducti.F90
+--- abinit-6.12.3/src/98_main/conducti.F90	2012-04-11 15:17:24.000000000 +1000
++++ abinit-kaneod/src/98_main/conducti.F90	2012-06-13 15:47:16.952208620 +1000
+@@ -104,7 +104,7 @@
+    call conducti_paw(filnam,filnam_out,mpi_enreg_seq)
+    call conducti_paw_core(filnam,filnam_out,mpi_enreg_seq)
+    call emispec_paw(filnam,filnam_out,mpi_enreg_seq)
+- elseif (incpaw==5) then
++ elseif (incpaw==5 .or. incpaw==7) then
+    call conducti_paw_core(filnam,filnam_out,mpi_enreg_seq)
+  elseif (incpaw==6) then
+    call emispec_paw(filnam,filnam_out,mpi_enreg_seq)
