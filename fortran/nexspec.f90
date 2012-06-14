@@ -148,30 +148,31 @@ program nexspec
   ! Most of the header is redundant in the bands file but we need to cross-
   ! check the number of kpoints, spins and eigenvalues. We also get the
   ! lattice vectors, number of electrons and fermi-level for free!
-  read(200,'(a19,I4)') tmpstr, tmpi
+  read(200,'(19x,I5)') tmpi
+  
   if (tmpi .ne. nkpts) then
     write(*,*) "ERROR: Number of k-points in .bands is not equal to the number in .eels_mat."
     call exit(1)
   end if
   
-  read(200,'(a26,I1)') tmpstr, tmpi
+  read(200,'(26x,I1)') tmpi
   if (tmpi .ne. nspins) then
     write(*,*) "ERROR: Number of spins in .bands is not equal to the number in .eels_mat."
     call exit(1)
   end if  
   
   if (nspins .eq. 1) then
-    read(200,'(a21,g10.4)') tmpstr, nelectrons(1)
-    read(200,'(a25,I4)') tmpstr, nbands(1)
-    read(200,'(a34,F12.6)') tmpstr, efermi(1)
+    read(200,'(20x,g10.4)') nelectrons(1)
+    read(200,'(22x,I6)') nbands(1)
+    read(200,'(31x,F12.6)') efermi(1)
     write(*,*) "Inside the .bands file we get:"
     write(*,*) "Number of electrons = ", nelectrons(1)
     write(*,*) "Number of bands = ", nbands(1)
     write(*,*) "Fermi level = ", efermi(1), " Ha"
   else
-    read(200,'(a21,2g10.4)') tmpstr, nelectrons(1:2)
-    read(200,'(a25,2I4)') tmpstr, nbands(1:2)
-    read(200,'(a34,2F12.6)') tmpstr, efermi(1:2)
+    read(200,'(20x,2g10.4)') nelectrons(1:2)
+    read(200,'(22x,2I6)') nbands(1:2)
+    read(200,'(31x,2F12.6)') efermi(1:2)
     write(*,*) "Inside the .bands file we get:"
     write(*,*) "Number of electrons = ", nelectrons(1:2)
     write(*,*) "Number of bands = ", nbands(1:2)
@@ -184,9 +185,9 @@ program nexspec
   read(200,'(3F12.6)') lvec(1:3,3)
   
   do nk=1,nkpts
-    read(200,'(a8,I1,4F12.8)') tmpstr, tmpi, kpts(nk,1:3), wk(nk)
+    read(200,'(8x,I5,4F12.8)') tmpi, kpts(nk,1:3), wk(nk)
     do ns=1,nspins
-      read(200,'(a15,I1)') tmpstr, tmpi
+      read(200,'(15x,I1)') tmpi
         do nb=1,nbands(ns)
           read(200, '(F14.8)') eigen(nb,nk,ns)
         end do
