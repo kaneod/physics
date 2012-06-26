@@ -50,6 +50,7 @@ program nexspec
   character(len=80),parameter :: ENDIAN = 'big_endian' ! CASTEP is conventionally compiled
   ! as a big-endian code: if you get ridiculous results from nexspec check if changing
   ! this to 'native' fixes it.
+  character(len=80), parameter :: param_file = 'nexspec.param'
   real(kind=dp), parameter :: invpi = 0.3183098861837907d0
   real(kind=dp), parameter :: pi = 3.141592653589793d0
   real(kind=dp), parameter :: invsqrt2pi = 0.3989422804014327d0
@@ -57,12 +58,12 @@ program nexspec
   real(kind=dp), parameter :: hart2eV = 27.211396132d0
   real(kind=dp), parameter :: tol = 1.0d-16
   
-  ! Spectrum parameters - EDIT THESE FOR YOUR SPECTRUM
-  integer, parameter :: smear_method = 1 ! 0 for Lorentzian, 1 for Gaussian.
-  real(kind=dp), parameter :: smear_width = 0.3d0 ! eV
-  real(kind=dp), parameter :: w_start = 275.0d0 ! eV
-  real(kind=dp), parameter :: w_end = 320.0d0 
-  integer, parameter :: spectrum_points = 2000
+  ! Spectrum parameters - will take from nexspec.param if it exists.
+  integer :: smear_method = 1 ! 0 for Lorentzian, 1 for Gaussian.
+  real(kind=dp) :: smear_width = 0.3d0 ! eV
+  real(kind=dp) :: w_start = 275.0d0 ! eV
+  real(kind=dp) :: w_end = 320.0d0 
+  integer :: spectrum_points = 2000
   
   ! Options for more realistic spectra - EDIT THESE FOR YOUR SPECTRUM
   ! What is going on here:
@@ -72,9 +73,11 @@ program nexspec
   ! scale, as the scaling is energy-dependent and non-linear. So, if scaling_prefactor
   ! is true, we need a non-zero (physical) core level. Can only handle one of these
   ! at the moment - eventually will have an array with e_core for each ion.
-  logical, parameter :: scaling_prefactor = .true.
-  real(kind=dp), parameter :: e_core = -284.8d0 ! eV
+  logical :: scaling_prefactor = .true.
+  real(kind=dp) :: e_core = -294.39d0 ! eV
   
+  ! Parameter file
+  logical :: file_exists = .false.
   character(len=80) :: seed, tmpstr, atstr(4)
   integer :: nargs, nk, orb, ns, nb, iw, icmpt
   
@@ -86,6 +89,21 @@ program nexspec
   real(kind=dp), dimension(:,:,:), allocatable :: eigen, spectrum
   real(kind=dp) :: efermi(2), nelectrons(2), lvec(3,3), w_step, w
   real(kind=dp) :: matrix_cmpt(6), e_nks, f_nks, smear_factor
+  
+  ! Check if nexspec.param is there: if so, set parameters.
+  inquire(file=param_file, exist=file_exists)
+  
+  if (file_exists) then
+    open(unit=300, file=param_file, form='formatted', status='old')
+    read(300,*) smear_method
+    read(300,*) smear_width
+    read(300,*) w_start
+    read(300,*) w_end
+    read(300,*) spectrum_points
+    read(300,*) scaling_prefactor
+    read(300,*) e_core
+    close(300)
+  end if
   
   ! Get the seedname from the command line, fail with usage if nargs != 1.
   nargs = command_argument_count()
@@ -172,7 +190,7 @@ program nexspec
   else
     read(200,'(20x,2g10.4)') nelectrons(1:2)
     read(200,'(22x,2I6)') nbands(1:2)
-    read(200,'(31x,2F12.6)') efermi(1:2)
+    read(200,'(33x,2F12.6)') efermi(1:2)
     write(*,*) "Inside the .bands file we get:"
     write(*,*) "Number of electrons = ", nelectrons(1:2)
     write(*,*) "Number of bands = ", nbands(1:2)
