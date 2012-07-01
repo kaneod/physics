@@ -123,6 +123,10 @@ class SPECSRegion:
     self.kinetic_axis = linspace(self.kinetic_energy, ke_upper, self.values_per_curve)
     self.binding_axis = self.excitation_energy - self.kinetic_axis
     
+    # Excitation axis (for NEXAFS)
+    exc_upper = self.excitation_energy + (self.values_per_curve - 1) * self.scan_delta
+    self.excitation_axis = linspace(self.excitation_energy, exc_upper, self.values_per_curve)
+    
     # MCD head and tail are the extra elements added to the beginning and
     # end of the scan.
     self.mcd_head = int(xmlregion[2].text)
@@ -168,7 +172,15 @@ class SPECSRegion:
           s = UnivariateSpline(x, y[self.mcd_head:-self.mcd_tail], k=1)
         self.counts += array([s(t) for t in x])
         self.channel_counts[:,i] = array([s(t) for t in x])
-      
+    
+    # Trim the extended channels.
+    for i in range(len(self.extended_channels)):
+      if self.mcd_tail == 0:
+        c = self.extended_channels[i]
+        self.extended_channels[i] = c[self.mcd_head:len(c)]
+      else:
+        self.extended_channels[i] = self.extended_channels[i][self.mcd_head:-self.mcd_tail]
+    
     # Extract the comment from the parameter list.
     for elem in xmlregion[9].iter("struct"):
       if elem[0].text == "Comment":
