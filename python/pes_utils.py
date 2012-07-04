@@ -52,6 +52,7 @@ def preedge_calculate(x,y):
   # pre-edge.
   p = np.polyfit(x[-mingrad:], y[-mingrad:], 1)
   return np.polyval(p,x)
+  
 def shirley_calculate(x,y):
   """ S = pes_utils.shirley_calculate(x,y)
   
