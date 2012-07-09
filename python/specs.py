@@ -230,7 +230,16 @@ def preedge_calculate(x,y):
   
   """
 
-  # First ensure the energy values are *decreasing* in the array,
+  # Make sure we've been passed arrays and not lists.
+  x = array(x)
+  y = array(y)
+  
+  # Sanity check: Do we actually have data to process here?
+  if not (x.any() and y.any()):
+    print "specs.preedge_calculate: One of the arrays x or y is empty. Returning zero background."
+    return zeros(x.shape)
+
+  # Next ensure the energy values are *decreasing* in the array,
   # if not, reverse them. 
   if x[0] < x[-1]:
     is_reversed = True
@@ -258,6 +267,13 @@ def preedge_calculate(x,y):
     dgrads.append(grads[i+1] - grads[i])
   dgrads = array(dgrads)
   
+  # We might not have actually accumulated anything if the maximum is near the
+  # edge (like in a survey scan - the SE background is very big). So, may have
+  # to return a zero background.
+  if not dgrads.any():
+    print "specs.preedge_calculate: No pre-edge gradients. The spectrum must be very large at the low kinetic energy end. Returning zero background."
+    return zeros(x.shape)
+  
   # Find the minimum index of the absolute of the gradient of gradients.
   mingrad = abs(dgrads).argmin()
   
@@ -281,8 +297,17 @@ def shirley_calculate(x,y, tol=1e-6, maxit=20):
   of iterations.
   
   """
+
+  # Make sure we've been passed arrays and not lists.
+  x = array(x)
+  y = array(y)
   
-  # First ensure the energy values are *decreasing* in the array,
+  # Sanity check: Do we actually have data to process here?
+  if not (x.any() and y.any()):
+    print "specs.shirley_calculate: One of the arrays x or y is empty. Returning zero background."
+    return zeros(x.shape)
+  
+  # Next ensure the energy values are *decreasing* in the array,
   # if not, reverse them.  
   if x[0] < x[-1]:
     is_reversed = True
