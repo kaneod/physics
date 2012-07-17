@@ -6,7 +6,7 @@ import csv
 import specs
 import os
 import os.path
-from numpy import zeros, savetxt
+from numpy import zeros, savetxt, amin
 from numpy import __version__ as npyversion
 
 DEBUG = 1
@@ -106,9 +106,33 @@ class Application(Frame):
               data[:,ex_out_fidx] = r.counts
               y = r.counts
               hdr_string += "Counts    "
-          data[:,-3] = specs.preedge_calculate(x,y)
-          data[:,-2] = specs.shirley_calculate(x,y - data[:,-3])
-          data[:,-1] = y - data[:,-3] - data[:,-2]
+          # The order of operations here is:
+          # 
+          # 1. Calculate the linear pre-edge (gives L).
+          # 2. Subtract the linear pre-edge (With next step gives y1).
+          # 3. Divide by an intensity offset to normalize against changes
+          #    in the overall intensity of the background, eg. from analyzer.
+          #    We take this offset to be the value of the linear pre-edge at the
+          #    lowest energy in the region. This could be more accurate but it 
+          #    is pretty good. This gives y1.
+          #    (We skip if the background is zero or contains zeros)
+          # 4. Calculate Shirley background using this new spectrum (gives S).
+          # 5. Subtract the Shirley background (gives y2).
+          
+          # Have to check for a zero-division here. If we encounter one,
+          # don't normalize against the pre-edge.
+          try:
+            L = specs.preedge_calculate(x,y)
+            y1 = (y - L) / L[x.argmin()]
+            S = specs.shirley_calculate(x,y1)
+            y2 = y1 - S
+            data[:,-3] = L
+            data[:,-2] = S
+            data[:,-1] = y2
+          except FloatingPointError:
+            data[:,-3] = specs.preedge_calculate(x,y)
+            data[:,-2] = specs.shirley_calculate(x,y - data[:,-3])
+            data[:,-1] = y - data[:,-3] - data[:,-2]
           hdr_string += "Preedge    Shirley    Counts-Preedge-Shirley    "
           
           try:
