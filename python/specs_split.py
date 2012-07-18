@@ -69,7 +69,8 @@ class Application(Frame):
             ex_out_fidx = ex_out_sidx + 9
           # For now, automatically add the shirley and linear subtractions.
           # Eventually this will be an option.
-          num_outputs += 3 # Linear preedge, shirley and counts - P - S.
+          num_outputs += 4 # Linear preedge, background
+          # scaling factor, shirley and counts - L - S.
           data = zeros((r.values_per_curve,num_outputs))
           hdr_string = ""
           if r.scan_mode == "FixedAnalyzerTransmission":
@@ -126,13 +127,15 @@ class Application(Frame):
             y1 = (y - L) / L[x.argmin()]
             S = specs.shirley_calculate(x,y1)
             y2 = y1 - S
-            data[:,-3] = L
+            data[:,-4] = L
+            data[:,-3] = L[x.argmin()]
             data[:,-2] = S
             data[:,-1] = y2
           except FloatingPointError:
-            data[:,-3] = specs.preedge_calculate(x,y)
-            data[:,-2] = specs.shirley_calculate(x,y - data[:,-3])
-            data[:,-1] = y - data[:,-3] - data[:,-2]
+            data[:,-4] = specs.preedge_calculate(x,y)
+            data[:,-3] = 1.0
+            data[:,-2] = specs.shirley_calculate(x,y - data[:,-4])
+            data[:,-1] = y - data[:,-4] - data[:,-2]
           hdr_string += "Preedge    Shirley    Counts-Preedge-Shirley    "
           
           try:
