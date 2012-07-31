@@ -107,12 +107,16 @@ program nexspec
   
   ! Get the seedname from the command line, fail with usage if nargs != 1.
   nargs = command_argument_count()
-  if (nargs .ne. 1) then
-    write(*,*) "Usage: nexspec SEED"
+  if ((nargs .ne. 1) .and. (nargs .ne. 2)) then
+    write(*,*) "Usage: nexspec SEED [CORELEVEL_ENERGY]"
     call exit(0)
   end if
   
   call get_command_argument(1,seed)
+  if (nargs .eq. 2) then
+    call get_command_argument(2,tmpstr)
+    read(tmpstr, *) e_core
+  end if
   
   ! Open the .eels_mat file and read the header.
   open(unit=100, file=adjustl(trim(seed))//'.eels_mat', form='unformatted',&
@@ -179,6 +183,9 @@ program nexspec
     call exit(1)
   end if  
   
+  if (DEBUG .eq. 1) then
+    print *, "Made it past integer reads"
+  end if
   if (nspins .eq. 1) then
     read(200,'(20x,g10.4)') nelectrons(1)
     read(200,'(22x,I6)') nbands(1)
