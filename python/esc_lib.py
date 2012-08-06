@@ -449,6 +449,87 @@ def remove_comments(lines, comment_delim="#",just_blanks=False):
     
     return stripped
     
+def abinit_read_bands(filename):
+  """ bands, properties = abinit_read_bands(filename)
+  
+  Reads in a _EIG output from ABINIT and returns as an array. Also reads in
+  the weightings (wtk) and the reduced coords of the kpoints.
+  
+  """
+  
+  f = open(filename, 'r')
+  
+  lines = f.readlines()
+  f.close()
+  nkpts = int(lines[0].split()[4])
+  bands = []
+  kpts = []
+  wtks = []
+  
+  curbands = []
+  for line in lines[1:]:
+    if line.startswith(" kpt#"):
+      if curbands != []:
+        bands.append(curbands)
+      curbands = []
+      wtks.append(float(line.split()[4].strip(',')))
+      kpts.append([float(x) for x in line.split()[6:9]])
+    else:
+      curbands = curbands + [float(x) for x in line.split()]
+      
+  bands.append(curbands)
+   
+  props = {}
+  props["kpts"] = kpts
+  props["wtks"] = wtks
+   
+  return bands, props
+
+def abinit_read_gw_bands(filename):
+  """ bands, properties = abinit_read_gw_bands(filename)
+  
+  Same as abinit_read_bands except reads the eigenvalues from an abinit
+  _GW file. Also returns the kpoints and the eigenvalue corrections.
+  
+  """
+  
+  f = open(filename, 'r')
+  
+  lines = f.readlines()
+  f.close()
+  nkpts = int(lines[0].split()[0])
+  kpts = []
+  bandindices = []
+  bands = []
+  corrs = []
+  lines = lines[1:]
+  
+  while len(lines) > 0:
+    curline = lines[0]
+    kpts.append([float(x) for x in curline.split()])
+    nvals = int(lines[1].split()[0])
+    lines = lines[2:]
+    curband = []
+    curbandindices = []
+    curcorrs = []
+    for i in range(nvals):
+      bits = lines[i].split()
+      curbandindices += [int(bits[0])]
+      curband += [float(bits[1])]
+      curcorrs += [float(bits[2])]
+    bands.append(curband)
+    corrs.append(curcorrs)
+    bandindices.append(curbandindices)
+    lines = lines[i+1:]
+    
+  props = {}
+  props["indices"] = bandindices
+  props["corrs"] = corrs
+  props["kpts"] = kpts
+  
+  return bands, props
+   
+   
 def castep_read_bands(filename):
   """ bands, properties = castep_read_bands(filename)
   
@@ -1426,7 +1507,7 @@ class Spectra:
   """
   
   def __init__(self, seed, atoms,source):
-    """ spectra = Spectra(seed, atoms)
+    """ spectra = Spectra(seed, atoms, source)
     
     Create a Spectra object. For conducti output, use source="conducti". For 
     nexspec output, use source="nexspec". Should also add conventional CASTEP
@@ -1436,6 +1517,14 @@ class Spectra:
     read in. For conducti output, atoms should be a range (indicating the 1-based atom
     indices from the original abinit input file.
     
+    If the nexspec output is a series of separate runs with files of the form:
+    
+    SEED_X_S_1_1_1.nexafs
+    
+    where X is an atom identifier (usually means the location of the core hole)
+    and S is the species (the 1s could foreseeably vary but typically won't), you
+    can specify source="nexspec-corehole" to parse the atomic index correctly. 
+    
     """
     
     if source == "conducti":
@@ -1443,9 +1532,11 @@ class Spectra:
       self.loadConductiPawCore(opt)
     elif source == "nexspec":
       self.loadNexspec(seed, atoms)
+    elif source == "nexspec-corehole":
+      self.loadNexspec(seed, atoms, option="corehole")
       
-  def loadNexspec(self, seed, species):
-    """ Spectra.loadNexspec(seed, species)
+  def loadNexspec(self, seed, species, option=""):
+    """ Spectra.loadNexspec(seed, species, option="")
     
     Internal: inits a Spectra object from nexspec output based on the CASTEP ELNES
     task.
@@ -1453,6 +1544,14 @@ class Spectra:
     NOTE: We can't yet deal with the situation where there are multiple core level
     spectra per atom (ie, 1s, 2s, 2p levels and so on). The current algorithm only
     stores the highest nlm-combination or whatever comes last as listed by listdir.
+    
+    The option input can presently be:
+    
+    option="" (default) - file name format is SEED_S_X_B_C.nexafs, read the atom
+                          index from X and match the species to S.
+    
+    option="corehole" - file name format is SEED_X_S_A_B_C.nexafs, read the 
+                        atom index from X and match the species to S.
     
     """
     
@@ -1469,9 +1568,13 @@ class Spectra:
       files = os.listdir(head)
     
     for filename in files:
-      if filename.startswith(seed+"_"+str(species)) and filename.endswith(".nexafs"):
-        self.atoms.append(int(filename.split("_")[2]))
-        self.data[int(filename.split("_")[2])] = loadtxt(filename)
+      if filename.startswith(seed) and filename.endswith(".nexafs") and int(filename.split("_")[-4]) == species:
+        if option == "corehole":
+          self.atoms.append(int(filename.split("_")[1]))
+          self.data[int(filename.split("_")[1])] = loadtxt(filename)
+        elif option == "":
+          self.atoms.append(int(filename.split("_")[2]))
+          self.data[int(filename.split("_")[2])] = loadtxt(filename)
     
     self.cmpts = zeros((len(self.atoms), self.data[self.atoms[0]].shape[0],7))
     
