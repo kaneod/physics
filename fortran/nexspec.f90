@@ -76,6 +76,16 @@ program nexspec
   logical :: scaling_prefactor = .true.
   real(kind=dp) :: e_core = -294.39d0 ! eV
   
+  ! If non_uniform_broadening is activated, we increase the smearing width
+  ! as a function of distance from the edge by smear = smear_scale * E + smear_width.
+  ! The default value of 0.1 is as suggested by Gao.
+  logical :: non_uniform_broadening = .true.
+  real(kind=dp) :: smear_scale = 0.1 ! eV
+  
+  ! If zero_fermi is true, all spectra have the eigenvalues subtracted so
+  ! efermi = 0.0 eV.
+  logical :: zero_fermi = .true.
+  
   ! Parameter file
   logical :: file_exists = .false.
   character(len=80) :: seed, tmpstr, atstr(4)
@@ -102,7 +112,14 @@ program nexspec
     read(300,*) spectrum_points
     read(300,*) scaling_prefactor
     read(300,*) e_core
+    read(300,*) non_uniform_broadening
+    read(300,*) smear_scale
+    read(300,*) zero_fermi
     close(300)
+  end if
+  
+  if (non_uniform_broadening .neqv. .true.) then
+    smear_scale = 0.0d0
   end if
   
   ! Get the seedname from the command line, fail with usage if nargs != 1.
@@ -225,19 +242,21 @@ program nexspec
   ! First we should really generate an occupancy function.
   ! But, let's just go T=0K and take f_nks = 0 if e_nks < efermi
   
-  ! Zero the fermi level.
-  if (nspins .eq. 1) then
-    eigen = eigen - efermi(1)
-    efermi(1) = 0.0d0
-  else
-    if (efermi(1) .gt. efermi(2)) then
+  ! If set, zero the fermi level.
+  if (zero_fermi .eqv. .true.) then
+    if (nspins .eq. 1) then
       eigen = eigen - efermi(1)
-      efermi(2) = efermi(2) - efermi(1)
       efermi(1) = 0.0d0
     else
-      eigen = eigen - efermi(2)
-      efermi(1) = efermi(1) - efermi(2)
-      efermi(2) = 0.0d0
+      if (efermi(1) .gt. efermi(2)) then
+        eigen = eigen - efermi(1)
+        efermi(2) = efermi(2) - efermi(1)
+        efermi(1) = 0.0d0
+      else
+        eigen = eigen - efermi(2)
+        efermi(1) = efermi(1) - efermi(2)
+        efermi(2) = 0.0d0
+      end if
     end if
   end if
   
@@ -271,10 +290,12 @@ program nexspec
             w = w_start + (iw-1)*w_step
             if (smear_method .eq. 0) then
               ! Lorentzian
-              smear_factor = invpi * (smear_width / ((e_nks - e_core - w)**2 + smear_width**2))
+              smear_factor = invpi * (dabs(smear_scale * (w - dabs(e_core)) + smear_width) / & 
+              & ((e_nks - e_core - w)**2 + (smear_scale * (w - dabs(e_core)) + smear_width)**2))
             else
               ! Gaussian
-              smear_factor = invsqrt2pi * 1.0d0 / smear_width * dexp(-0.5d0 * ((e_nks - e_core - w)/smear_width)**2)
+              smear_factor = invsqrt2pi * 1.0d0 / dabs(smear_scale * (w - dabs(e_core)) + smear_width) * & 
+              & dexp(-0.5d0 * ((e_nks - e_core - w)/dabs(smear_scale * (w - dabs(e_core)) + smear_width))**2)
             end if
             do icmpt=1,6
               spectrum(orb,iw,icmpt) = spectrum(orb,iw,icmpt) + wk(nk) * f_nks * matrix_cmpt(icmpt) * smear_factor

@@ -38,7 +38,7 @@ from numpy.linalg import norm, inv
 from numpy.fft import fftn, ifftn
 from scipy.interpolate import interp1d
 from scipy.special import sph_harm
-from scipy.optimize import leastsq
+from scipy.optimize import leastsq, curve_fit, fmin_slsqp
 #from scipy.optimize import minimize
 from libabitools import io, wave, spectra
 from scipy.io import netcdf
@@ -544,19 +544,26 @@ def castep_read_bands(filename):
   lines = f.readlines()
   nkpts = int(lines[0].split()[3])
   nspins = int(lines[1].split()[4])
-  nelectrons = float(lines[2].split()[3])
-  nbands = int(lines[3].split()[3])
-  efermi = float(lines[4].split()[5])
+  if nspins == 1:
+    nelectrons = float(lines[2].split()[3])
+    nbands = int(lines[3].split()[3])
+    efermi = float(lines[4].split()[5])
+  else:
+    nelectrons = [float(x) for x in lines[2].split()[3:]]
+    nbands = [int(x) for x in lines[3].split()[3:]]
+    efermi = [float(x) for x in lines[4].split()[5:]]
   data = lines[9:]
   
   bands = []
   
   for k in range(nkpts):
+    # Skip the kpoint line  
+    data = data[1:]
     for s in range(nspins):
-      data = data[2:]
-      tmp = data[0:nbands]
+      data = data[1:]
+      tmp = data[0:nbands[s]]
       bands.append(array([float(x.strip()) for x in tmp]))
-      
+      data = data[nbands[s]:]
   props = {}
   
   props["nbands"] = nbands
@@ -1747,7 +1754,7 @@ class Spectra:
     spectrum[:,0] = self.cmpts[0,:,0]
     spectrum[:,1] = spectrum[:,1] / samples
     return spectrum
-    
+
   def bestFitToExperiment(self, exp_data, energy_range=None, energy_offset=0.0):
     """ theta, phi, I0, data = Spectra.bestFitToExperiment(exp_data, energy_range=None, energy_offset=0.0)
     
@@ -1778,6 +1785,7 @@ class Spectra:
     if DEBUG:
       print "Fitting computational data between indices %d and %d." % (estart, eend)  
     y = interp1d(exp_data[:,0], exp_data[:,1], bounds_error=False, fill_value=0.0)
+    ran = self.spectrumRandom()
     
     # Construct interpolated experimental values depending on energy_offset,
     # then define the residue function.
@@ -1799,12 +1807,13 @@ class Spectra:
       data[:,2] = cdat[:,1]
       return r[0][0], r[0][1],r[0][2], data
     else:
-      yexp = array([y(x-energy_offset) for x in self.cmpts[0,:,0]])
+      yexp = array([y(x-energy_offset) for x in self.cmpts[0,estart:eend+1,0]])
       def fitfunc(p):
-        # p[0] = theta, p[1] = phi, p[2] = I0
+        # p[0] = theta, p[1] = phi, p[2] = I0, p[3] = mixing fraction
         spec = spectra.spectrum_tp(self.cmpts, p[0],p[1])
-        return (p[2] * spec[:,1] - yexp)
-      r = leastsq(fitfunc, [45.0, 45.0, 1000], full_output=1)
+        return norm(p[2] * (p[3] * spec[estart:eend+1,1] + (1-p[3]) * ran[estart:eend+1,1]) - yexp)
+      #r = leastsq(fitfunc, [45.0, 45.0, 1000, 0.5], full_output=1)
+      r = fmin_slsqp(fitfunc, [45.0, 45.0, 1000, 0.5], bounds=[[0.0,180.0],[0.0,360.0], [0.1, 1e8], [0.0, 1.0]], full_output=True)
       cdat = spectra.spectrum_tp(self.cmpts, r[0][0], r[0][1])
       cdat[:,0] = cdat[:,0] - energy_offset
       cdat[:,1] = r[0][2] * cdat[:,1]
@@ -1812,8 +1821,8 @@ class Spectra:
       data[:,0] = cdat[:,0]
       data[:,1] = array([y(x-energy_offset) for x in self.cmpts[0,:,0]])
       data[:,2] = cdat[:,1]
-      return r[0][0], r[0][1],r[0][2], data
-    
+      return r[0][0], r[0][1],r[0][2],r[0][3], data
+       
   def bestFitToFile(self, filename, energy_range=None,exp_offset=0.0, comp_offset=0.0):
     """ theta, phi, I0, data = Spectra.bestFitToFile(filename, energy_range=None, energy_offset=0.0)
     
