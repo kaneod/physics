@@ -472,8 +472,8 @@ def abinit_read_bands(filename):
       if curbands != []:
         bands.append(curbands)
       curbands = []
-      wtks.append(float(line.split()[4].strip(',')))
-      kpts.append([float(x) for x in line.split()[6:9]])
+      wtks.append(float(line.strip().split()[5].strip(',')))
+      kpts.append([float(x) for x in line.strip().split()[7:10]])
     else:
       curbands = curbands + [float(x) for x in line.split()]
       
