@@ -267,6 +267,11 @@ program nexspec
   w_step = (w_end - w_start) / spectrum_points
   
   ! For each orbital, sum matrix elements over k, s and w for each b.
+  ! Each orbital is independent so we can do this in parallel.
+!$OMP PARALLEL DO &
+!$OMP& DEFAULT(SHARED) &
+!$OMP& PRIVATE(ns, nk, nb, e_nks, f_nks, iw, w, smear_factor, icmpt, tmpstr) &
+!$OMP& PRIVATE(matrix_cmpt)
   do orb=1,ncproj
     do ns=1,nspins
       do nk=1,nkpts
@@ -313,22 +318,26 @@ program nexspec
         end if
       end do
     end do
+  end do
+!$OMP END PARALLEL DO
+  
+  ! Optional - apply an inverse-frequency scaling. This makes the spectrum actually
+  ! scale like the adsorption spectrum should, but on the other hand, relies on setting 
+  ! the core energy correctly, otherwise the scaling is far too strong near
+  ! the edge.
+  ! Note: A volume factor is missing here. Should use the lattice parameters to generate
+  ! the volume and divide that out as well.
     
-    ! Optional - apply an inverse-frequency scaling. This makes the spectrum actually
-    ! scale like the adsorption spectrum should, but on the other hand, relies on setting 
-    ! the core energy correctly, otherwise the scaling is far too strong near
-    ! the edge.
-    ! Note: A volume factor is missing here. Should use the lattice parameters to generate
-    ! the volume and divide that out as well.
-    
-    if (scaling_prefactor) then
-      do iw=1,spectrum_points
-        w = w_start + (iw-1)*w_step
-        spectrum(1:ncproj,iw,1:6) = (8.0d0 * pi ** 2 * invfinestruct / (3.0d0 * w)) * &
-&                                     spectrum(1:ncproj,iw,1:6)
-      end do
-    end if
-    
+  if (scaling_prefactor) then
+    do iw=1,spectrum_points
+      w = w_start + (iw-1)*w_step
+      spectrum(1:ncproj,iw,1:6) = (8.0d0 * pi ** 2 * invfinestruct / (3.0d0 * w)) * &
+&                                   spectrum(1:ncproj,iw,1:6)
+    end do
+  end if
+  
+
+  do orb=1,ncproj    
     ! Output each spectrum to a file.
     !tmpstr = ''
     write(*,*) 'Writing orbital ', orb

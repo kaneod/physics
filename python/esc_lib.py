@@ -1814,13 +1814,19 @@ class Spectra:
         return norm(p[2] * (p[3] * spec[estart:eend+1,1] + (1-p[3]) * ran[estart:eend+1,1]) - yexp)
       #r = leastsq(fitfunc, [45.0, 45.0, 1000, 0.5], full_output=1)
       r = fmin_slsqp(fitfunc, [45.0, 45.0, 1000, 0.5], bounds=[[0.0,180.0],[0.0,360.0], [0.1, 1e8], [0.0, 1.0]], full_output=True)
+      
       cdat = spectra.spectrum_tp(self.cmpts, r[0][0], r[0][1])
       cdat[:,0] = cdat[:,0] - energy_offset
       cdat[:,1] = r[0][2] * cdat[:,1]
-      data = zeros((cdat.shape[0], 3))
+      rdat = r[0][2] * self.spectrumRandom()[:,1]
+      # Construct an output array with columns energy, experimental intensity,
+      # calculated best fit intensity, random component, oriented component.
+      data = zeros((cdat.shape[0], 5))
       data[:,0] = cdat[:,0]
       data[:,1] = array([y(x-energy_offset) for x in self.cmpts[0,:,0]])
-      data[:,2] = cdat[:,1]
+      data[:,2] = r[0][3] * cdat[:,1] + (1.0 - r[0][3]) * rdat 
+      data[:,3] = (1.0 - r[0][3]) * rdat
+      data[:,4] = r[0][3] * cdat[:,1]
       return r[0][0], r[0][1],r[0][2],r[0][3], data
        
   def bestFitToFile(self, filename, energy_range=None,exp_offset=0.0, comp_offset=0.0):
