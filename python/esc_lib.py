@@ -1839,32 +1839,27 @@ class Spectra:
     y = interp1d(exp_data[:,0], exp_data[:,1], bounds_error=False, fill_value=0.0)
     ran = self.spectrumRandom()
     
-      yexp = array([y(x-energy_offset) for x in self.cmpts[0,estart:eend+1,0]])
-      def fitfunc(p):
-        # p[0] = theta, p[1] = phi, p[2] = I0, p[3] = mixing fraction
-        # We change scale of p's to help better condition the Jacobian - set
-        # all parameters to order 1 externally and rescale here.
-        spec = spectra.spectrum_tp(self.cmpts, p[0] * 100,p[1] * 100)
-        return norm(p[2] * 1000 * (p[3] * spec[estart:eend+1,1] + (1-p[3]) * ran[estart:eend+1,1]) - yexp)
-      #r = leastsq(fitfunc, [45.0, 45.0, 1000, 0.5], full_output=1)
-      r = fmin_slsqp(fitfunc, [0.45, 0.45, 1.0, 0.5], bounds=[[0.0,3.6],[0.0,3.6], [0.1, 1e2], [0.0, 1.0]], full_output=True, iter=1000, iprint=2, acc=1.0e-9, epsilon=0.001)
-      # Now backscale
-      r[0][0] *= 100
-      r[0][1] *= 100
-      r[0][2] *= 1000
-      cdat = spectra.spectrum_tp(self.cmpts, r[0][0], r[0][1])
-      cdat[:,0] = cdat[:,0] - energy_offset
-      cdat[:,1] = r[0][2] * cdat[:,1]
-      rdat = r[0][2] * self.spectrumRandom()[:,1]
-      # Construct an output array with columns energy, experimental intensity,
-      # calculated best fit intensity, random component, oriented component.
-      data = zeros((cdat.shape[0], 5))
-      data[:,0] = cdat[:,0]
-      data[:,1] = array([y(x-energy_offset) for x in self.cmpts[0,:,0]])
-      data[:,2] = r[0][3] * cdat[:,1] + (1.0 - r[0][3]) * rdat 
-      data[:,3] = (1.0 - r[0][3]) * rdat
-      data[:,4] = r[0][3] * cdat[:,1]
-      return r[0][0], r[0][1],r[0][2],r[0][3], data
+    yexp = array([y(x-energy_offset) for x in self.cmpts[0,estart:eend+1,0]])
+    
+    def fitfunc(p):
+      # p[0] = theta, p[1] = phi, p[2] = I0, p[3] = mixing fraction
+      spec = spectra.spectrum_tp(self.cmpts, p[0],p[1])
+      return norm(p[2] * (p[3] * spec[estart:eend+1,1] + (1-p[3]) * ran[estart:eend+1,1]) - yexp)
+
+    r = fmin_slsqp(fitfunc, [45.0, 45.0, 100, 0.5], bounds=[[0.0,180.0],[0.0,360.0], [0.1, 1e5], [0.0, 1.0]], full_output=True, iter=1000, iprint=2, acc=1.0e-9, epsilon=0.001)
+    cdat = spectra.spectrum_tp(self.cmpts, r[0][0], r[0][1])
+    cdat[:,0] = cdat[:,0] - energy_offset
+    cdat[:,1] = r[0][2] * cdat[:,1]
+    rdat = r[0][2] * self.spectrumRandom()[:,1]
+    # Construct an output array with columns energy, experimental intensity,
+    # calculated best fit intensity, random component, oriented component.
+    data = zeros((cdat.shape[0], 5))
+    data[:,0] = cdat[:,0]
+    data[:,1] = array([y(x-energy_offset) for x in self.cmpts[0,:,0]])
+    data[:,2] = r[0][3] * cdat[:,1] + (1.0 - r[0][3]) * rdat 
+    data[:,3] = (1.0 - r[0][3]) * rdat
+    data[:,4] = r[0][3] * cdat[:,1]
+    return r[0][0], r[0][1],r[0][2],r[0][3], data
        
   def bestFitToFile(self, filename, energy_range=None,exp_offset=0.0, comp_offset=0.0):
     """ theta, phi, I0, data = Spectra.bestFitToFile(filename, energy_range=None, energy_offset=0.0)
