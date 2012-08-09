@@ -32,7 +32,7 @@
 
 
 from __future__ import division
-from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin, exp, arange, arccos, arctan2, complex, polyfit, poly1d, loadtxt
+from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin, exp, arange, arccos, arctan2, complex, polyfit, poly1d, loadtxt, amin, amax, argmin, argmax
 from random import random as rand
 from numpy.linalg import norm, inv
 from numpy.fft import fftn, ifftn
@@ -1754,7 +1754,58 @@ class Spectra:
     spectrum[:,0] = self.cmpts[0,:,0]
     spectrum[:,1] = spectrum[:,1] / samples
     return spectrum
+    
+  def fitXYZ(self, exp_data, energy_range=None, energy_offset=0.0):
+    """ a, b, c, I0, data = Spectra.fitXYZ(exp_data, energy_range=None, energy_offset=0.0)
+    
+    Takes an experimental spectrum (Nx2-shaped array, first column is energy,
+    second column is intensity) and finds the best linear combination of 
+    orthogonal spectra I0 * (aX+bY+cZ) to fit. Note that this is physically
+    incorrect but seems to be what people do in the papers...
+    
+    See the docstring for Spectra.bestFitToExperiment to find out more about
+    the parameters. The only difference is that here we do internal unit
+    conversions, assuming the exp_data is in eV.
+    
+    """
+    
+    if energy_range is None:
+      estart = 0
+      eend = self.cmpts.shape[1]
+    else:
+      estart = spectra.closest_index_to_energy(self.cmpts[0,:,0], energy_range[0])
+      eend = spectra.closest_index_to_energy(self.cmpts[0,:,0], energy_range[1])      
 
+    edat = exp_data.copy()   # So we don't mess with the input variable
+    edat[:,0] = eV2hartree(edat[:,0] - energy_offset)
+    print "Exp_data bounds: ", amin(edat[:,0]), amax(edat[:,0])
+    
+    y = interp1d(edat[:,0], edat[:,1], bounds_error=False, fill_value=0.0)
+    
+    # Get our three orthogonal spectra
+    X = spectra.spectrum_xyz(self.cmpts, [1,0,0])
+    Y = spectra.spectrum_xyz(self.cmpts, [0,1,0])
+    Z = spectra.spectrum_xyz(self.cmpts, [0,0,1])
+    
+    yexp = array([y(x) for x in self.cmpts[0,estart:eend+1,0]])
+    def fitfunc(p):
+      # Function is p[0] * (p[1] * X + p[2] * Y + p[3] * Z)
+      return norm(p[0] * (p[1] * X[estart:eend+1,1] + p[2] * Y[estart:eend+1,1] + p[3] * Z[estart:eend+1,1])-yexp)
+      
+    r = fmin_slsqp(fitfunc, [1000.0, 0.3, 0.3, 0.3], bounds=[[0.1,1e8],[0.0,1.0],[0.0,1.0],[0.0,1.0]], full_output=True)
+    cdat = spectra.spectrum_xyz(self.cmpts, [r[0][1],r[0][2],r[0][3]])
+    data = zeros((cdat.shape[0], 7))
+    data[:,0] = cdat[:,0]
+    data[:,1] = array([y(x) for x in self.cmpts[0,:,0]])
+    data[:,2] = r[0][0] * (r[0][1] * X[:,1] + r[0][2] * Y[:,1] + r[0][3] * Z[:,1])
+    data[:,3] = r[0][0] * r[0][1] * X[:,1]
+    data[:,4] = r[0][0] * r[0][2] * Y[:,1]
+    data[:,5] = r[0][0] * r[0][3] * Z[:,1]
+    data[:,6] = r[0][0] * cdat[:,1]
+    return r[0][1], r[0][2], r[0][3], r[0][0], data
+    
+    
+    
   def bestFitToExperiment(self, exp_data, energy_range=None, energy_offset=0.0):
     """ theta, phi, I0, data = Spectra.bestFitToExperiment(exp_data, energy_range=None, energy_offset=0.0)
     
@@ -1783,38 +1834,24 @@ class Spectra:
       eend = spectra.closest_index_to_energy(self.cmpts[0,:,0], energy_range[1])
     
     if DEBUG:
-      print "Fitting computational data between indices %d and %d." % (estart, eend)  
+      print "Fitting computational data between indices %d and %d." % (estart, eend)
+      print "Exp_data range is", amin(exp_data[:,0]), amax(exp_data[:,0])
     y = interp1d(exp_data[:,0], exp_data[:,1], bounds_error=False, fill_value=0.0)
     ran = self.spectrumRandom()
     
-    # Construct interpolated experimental values depending on energy_offset,
-    # then define the residue function.
-    
-    if energy_offset is None:
-      # Much slower because we have to construct yexp at each function step
-      def fitfunc(p):
-        # p[0] = theta, p[1] = phi, p[2] = I0, p[3] = E0 shift.
-        yexp = array([y(x-p[3]) for x in self.cmpts[0,:,0]])
-        spec = spectra.spectrum_tp(self.cmpts, p[0],p[1])
-        return p[2] * spec[:,1] - yexp
-      r = leastsq(fitfunc, [45.0,45.0, 1000.0, 0.1], full_output=1)
-      cdat = spectra.spectrum_tp(self.cmpts, r[0][0], r[0][1])
-      cdat[:,0] = cdat[:,0] - r[0][3]
-      cdat[:,1] = r[0][2] * cdat[:,1]
-      data = zeros((cdat.shape[0], 3))
-      data[:,0] = cdat[:,0]
-      data[:,1] = array([y(x) for x in self.cmpts[0,:,0]])
-      data[:,2] = cdat[:,1]
-      return r[0][0], r[0][1],r[0][2], data
-    else:
       yexp = array([y(x-energy_offset) for x in self.cmpts[0,estart:eend+1,0]])
       def fitfunc(p):
         # p[0] = theta, p[1] = phi, p[2] = I0, p[3] = mixing fraction
-        spec = spectra.spectrum_tp(self.cmpts, p[0],p[1])
-        return norm(p[2] * (p[3] * spec[estart:eend+1,1] + (1-p[3]) * ran[estart:eend+1,1]) - yexp)
+        # We change scale of p's to help better condition the Jacobian - set
+        # all parameters to order 1 externally and rescale here.
+        spec = spectra.spectrum_tp(self.cmpts, p[0] * 100,p[1] * 100)
+        return norm(p[2] * 1000 * (p[3] * spec[estart:eend+1,1] + (1-p[3]) * ran[estart:eend+1,1]) - yexp)
       #r = leastsq(fitfunc, [45.0, 45.0, 1000, 0.5], full_output=1)
-      r = fmin_slsqp(fitfunc, [45.0, 45.0, 1000, 0.5], bounds=[[0.0,180.0],[0.0,360.0], [0.1, 1e8], [0.0, 1.0]], full_output=True)
-      
+      r = fmin_slsqp(fitfunc, [0.45, 0.45, 1.0, 0.5], bounds=[[0.0,3.6],[0.0,3.6], [0.1, 1e2], [0.0, 1.0]], full_output=True, iter=1000, iprint=2, acc=1.0e-9, epsilon=0.001)
+      # Now backscale
+      r[0][0] *= 100
+      r[0][1] *= 100
+      r[0][2] *= 1000
       cdat = spectra.spectrum_tp(self.cmpts, r[0][0], r[0][1])
       cdat[:,0] = cdat[:,0] - energy_offset
       cdat[:,1] = r[0][2] * cdat[:,1]

@@ -74,17 +74,27 @@ program nexspec
   ! is true, we need a non-zero (physical) core level. Can only handle one of these
   ! at the moment - eventually will have an array with e_core for each ion.
   logical :: scaling_prefactor = .true.
-  real(kind=dp) :: e_core = -294.39d0 ! eV
+  real(kind=dp) :: e_core = -290.0d0 ! eV
   
   ! If non_uniform_broadening is activated, we increase the smearing width
-  ! as a function of distance from the edge by smear = smear_scale * E + smear_width.
-  ! The default value of 0.1 is as suggested by Gao.
+  ! as a function of distance from the transition edge. The formula used sets
+  ! the smearing to 0 eV at smear_offset below the transition energy (the
+  ! absolute value of the core level) and to smear_width at the transition
+  ! energy itself. The smearing function is linear. So, increase smear_offset 
+  ! to slow the broadening, or just set non_uniform_broadening to .false.
+  ! The default value of 145 eV is roughly equivalent to Gao's 0.1E+smear_width
+  ! function for the carbon edge.
   logical :: non_uniform_broadening = .true.
-  real(kind=dp) :: smear_scale = 0.1 ! eV
+  real(kind=dp) :: smear_offset = 145.0d0 ! eV
+  real(kind=dp) :: smear_value = 0.0d0
+  real(kind=dp) :: smear_intercept = 0.0d0
+  real(kind=dp) :: smear_gradient = 0.0d0
   
   ! If zero_fermi is true, all spectra have the eigenvalues subtracted so
-  ! efermi = 0.0 eV.
-  logical :: zero_fermi = .true.
+  ! efermi = 0.0 eV. This is not a good idea for core-hole calculations
+  ! where each atomic excitation leads to a completely different energy
+  ! spectrum.
+  logical :: zero_fermi = .false.
   
   ! Parameter file
   logical :: file_exists = .false.
@@ -113,19 +123,42 @@ program nexspec
     read(300,*) scaling_prefactor
     read(300,*) e_core
     read(300,*) non_uniform_broadening
-    read(300,*) smear_scale
+    read(300,*) smear_offset
     read(300,*) zero_fermi
     close(300)
   end if
   
   if (non_uniform_broadening .neqv. .true.) then
-    smear_scale = 0.0d0
+    smear_value = smear_width
+  else
+    smear_gradient = smear_width / smear_offset
+    smear_intercept = smear_width / (dabs(e_core) / (dabs(e_core) - smear_offset) - 1.0d0)
   end if
   
   ! Get the seedname from the command line, fail with usage if nargs != 1.
   nargs = command_argument_count()
   if ((nargs .ne. 1) .and. (nargs .ne. 2)) then
     write(*,*) "Usage: nexspec SEED [CORELEVEL_ENERGY]"
+    write(*,*) " "
+    write(*,*) "Parameter file nexspec.param:"
+    write(*,*) " "
+    write(*,*) " smear_method: 0 (Lorentzian) or 1 (Gaussian, default)"
+    write(*,*) " smear_width: in eV (default 0.3)"
+    write(*,*) " w_start: Starting photon energy in eV (default 275.0)"
+    write(*,*) " w_end: End photon energy in eV (default 320.0)"
+    write(*,*) " spectrum_points: Number of points in the spectrum (default 2000)"
+    write(*,*) " scaling_prefactor: Set to .true. to scale spectrum by 1/w (default .true.)"
+    write(*,*) "         Note: the 1/w factor appears in the cross section for NEXAFS, see Stohr."
+    write(*,*) " e_core: Core level energy in eV, should be negative (default -290.0)"
+    write(*,*) "         Note: this is overridden by the command-line input." 
+    write(*,*) " non_uniform_broadening: Set to .true. (default) to use an energy-dependent smearing"
+    write(*,*) "         width to generate assymetric lineshapes. See Stohr chapter 7.2."
+    write(*,*) " smear_offset: Energy offset before the edge at which point the smearing is"
+    write(*,*) "         zero. Should be positive. Default is 145.0, gives Gao's smearing for carbon."
+    write(*,*) " zero_fermi: Set to .true. to subtract e_fermi from all the energy levels"
+    write(*,*) "         before processing. This is a Bad Thing (TM) when adding spectra"
+    write(*,*) "         from separate core hole calculations together so is .false. by default."
+    
     call exit(0)
   end if
   
@@ -271,7 +304,7 @@ program nexspec
 !$OMP PARALLEL DO &
 !$OMP& DEFAULT(SHARED) &
 !$OMP& PRIVATE(ns, nk, nb, e_nks, f_nks, iw, w, smear_factor, icmpt, tmpstr) &
-!$OMP& PRIVATE(matrix_cmpt)
+!$OMP& PRIVATE(smear_value, matrix_cmpt)
   do orb=1,ncproj
     do ns=1,nspins
       do nk=1,nkpts
@@ -293,14 +326,15 @@ program nexspec
           
           do iw=1,spectrum_points
             w = w_start + (iw-1)*w_step
+            if (non_uniform_broadening .eqv. .true.) then
+              smear_value = smear_gradient * w - smear_intercept
+            end if
             if (smear_method .eq. 0) then
               ! Lorentzian
-              smear_factor = invpi * (dabs(smear_scale * (w - dabs(e_core)) + smear_width) / & 
-              & ((e_nks - e_core - w)**2 + (smear_scale * (w - dabs(e_core)) + smear_width)**2))
+              smear_factor = invpi * smear_value / ((e_nks - e_core - w)**2 + (smear_value)**2)
             else
               ! Gaussian
-              smear_factor = invsqrt2pi * 1.0d0 / dabs(smear_scale * (w - dabs(e_core)) + smear_width) * & 
-              & dexp(-0.5d0 * ((e_nks - e_core - w)/dabs(smear_scale * (w - dabs(e_core)) + smear_width))**2)
+              smear_factor = invsqrt2pi * 1.0d0 / smear_value * dexp(-0.5d0 * ((e_nks - e_core - w)/smear_value)**2)
             end if
             do icmpt=1,6
               spectrum(orb,iw,icmpt) = spectrum(orb,iw,icmpt) + wk(nk) * f_nks * matrix_cmpt(icmpt) * smear_factor
