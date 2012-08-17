@@ -49,7 +49,7 @@ DEBUG=1
 
 # Element dictionaries
 
-elements = { 1 : "H", 2 : "He", 3 : "Li",  4 : "Be", 5 : "B", 6 : "C", 7 : "N" , 8 : "O", 29 : "Cu", 14 : "Si" , 13 : "Al"}
+elements = { 1 : "H", 2 : "He", 3 : "Li",  4 : "Be", 5 : "B", 6 : "C", 7 : "N" , 8 : "O", 9 : "F", 29 : "Cu", 14 : "Si" , 13 : "Al"}
 xsf_keywords = ["ANIMSTEPS", "CRYSTAL", "ATOMS", "PRIMVEC", "PRIMCOORD"]
 bond_lengths = {"CH" : 2.06, "CC" : 2.91, "NC" : 2.78, "NH" : 1.91, "HH" : 2.27}
 
@@ -489,7 +489,9 @@ def abinit_read_gw_bands(filename):
   """ bands, properties = abinit_read_gw_bands(filename)
   
   Same as abinit_read_bands except reads the eigenvalues from an abinit
-  _GW file. Also returns the kpoints and the eigenvalue corrections.
+  _GW file. Also returns the kpoints and the eigenvalue corrections. Note that
+  the _GW file contains the levels in eV. For consistency in accordance with our
+  internal code policy we convert this to hartree.
   
   """
   
@@ -527,6 +529,7 @@ def abinit_read_gw_bands(filename):
   props["corrs"] = corrs
   props["kpts"] = kpts
   
+  bands = eV2hartree(bands)
   return bands, props
    
    
