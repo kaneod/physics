@@ -37,6 +37,7 @@ from random import random as rand
 from numpy.linalg import norm, inv
 from numpy.fft import fftn, ifftn
 from scipy.interpolate import interp1d
+from scipy.integrate import quad
 from scipy.special import sph_harm
 from scipy.optimize import leastsq, curve_fit, fmin_slsqp
 #from scipy.optimize import minimize
@@ -299,6 +300,74 @@ def normalize_integral(x, y):
   
   return y / intsum
   
+def integral_smoothing(data, period, pbc=False):
+  """ smooth_data = integral_smoothing(data, period)
+  
+  Assumes data is two column with x values data[:,0] and y values data[:,1].
+  Then the new y value at x is an integral of the old data within a single
+  period centred on x. Period is in the same units as the data x-axis itself.
+  
+  Set pbs to True (default False) to integrate past the edge and wrap around 
+  (ie periodic boundary conditions).
+  
+  The only condition imposed is that the period must be less than the span
+  of x - I haven't written "multi-wrap-around" code here so it can't handle
+  multiply-periodic spans.
+  
+  """
+  
+  # Check the period is less than the span of x.
+  if period > abs(amax(data[:,0]) - amin(data[:,0])):
+    print "ERROR (integral_smoothing): Period greater than span of x. This is not allowed."
+    return None
+  
+  # Make an interpolater and a new data array. We also need to know the 
+  # bounds of x to use in the case of periodic boundary conditions.
+  smooth = zeros(data.shape)
+  func = interp1d(data[:,0], data[:,1])
+  xmin = amin(data[:,0])
+  xmax = amax(data[:,0])
+  
+  lx = xmin
+  rx = xmax
+  
+  halfp = float(period) / 2.0
+  
+  # For each point compute the integral.
+  for i, x in enumerate(data[:,0]):
+    smooth[i,0] = x
+    if x - halfp < xmin:
+      lx = xmin
+    else:
+      lx = x - halfp
+    if x + halfp > xmax:
+      rx = xmax
+    else:
+      rx = x + halfp
+    if DEBUG:
+      print "At point %f, integrating between %f and %f." % (x, lx, rx)
+    # Integrate the bit between lx and rx
+    this_int = quad(func, lx, rx)[0]
+    if DEBUG:
+      print "Result is %f." % this_int
+    # If PBCs are used, need to add any bits that pass the boundaries.
+    if pbc is True:
+      if x - halfp < xmin:
+        lx = xmax - (halfp + xmin - x)
+        rx = xmax
+        this_int += quad(func, lx, rx)[0]
+        if DEBUG:
+          print "Added PBC extra bit %f." % (this_int)
+      if x + halfp > xmax:
+        lx = xmin
+        rx = xmin + halfp - xmax + x
+        this_int += quad(func, lx, rx)[0]
+        if DEBUG:
+          print "Added PBC extra bit %f." % (this_int)
+    smooth[i,1] = this_int / period
+    
+  return smooth
+  
 def read_xy(filename, comment_delim="#"):
   """ data = read_xy(filename, comment_delim="#")
   
@@ -548,9 +617,9 @@ def castep_read_bands(filename):
   nkpts = int(lines[0].split()[3])
   nspins = int(lines[1].split()[4])
   if nspins == 1:
-    nelectrons = float(lines[2].split()[3])
-    nbands = int(lines[3].split()[3])
-    efermi = float(lines[4].split()[5])
+    nelectrons = [float(lines[2].split()[3])]
+    nbands = [int(lines[3].split()[3])]
+    efermi = [float(lines[4].split()[5])]
   else:
     nelectrons = [float(x) for x in lines[2].split()[3:]]
     nbands = [int(x) for x in lines[3].split()[3:]]
