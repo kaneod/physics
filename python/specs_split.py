@@ -49,8 +49,25 @@ class Application(Frame):
       for g in xmlcontents.groups:
         if DEBUG:
           print "=================== OUTPUT: %s ====================" % (g.name)
-        os.mkdir(g.name)
-        os.chdir(g.name)
+        # We want to make a folder matching the group name, but we might not
+        # be able to because it might already exist (group names are not
+        # required to be unique in SPECS). So we have to fiddle here a bit.
+        have_name = False
+        name_counter = 0
+        while not have_name:
+          try:
+            if name_counter == 0:
+              tmpname = g.name
+            else:
+              tmpname = g.name + "-" + str(name_counter)
+            os.mkdir(tmpname)
+            os.chdir(tmpname)
+            have_name = True
+            name_counter = 0
+          except OSError:
+            # Darn, the directory prob already exists. 
+            name_counter += 1
+          
         for r in g.regions:
           if DEBUG:
             print "Constructing output for region %s..." % (r.name)
