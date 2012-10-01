@@ -55,16 +55,16 @@ class Application(Frame):
         have_name = False
         name_counter = 0
         while not have_name:
-          try:
-            if name_counter == 0:
-              tmpname = g.name
-            else:
-              tmpname = g.name + "-" + str(name_counter)
+          if name_counter == 0:
+            tmpname = g.name
+          else:
+            tmpname = g.name + "-" + str(name_counter)
+          if not os.path.exists(tmpname):
             os.mkdir(tmpname)
             os.chdir(tmpname)
             have_name = True
             name_counter = 0
-          except OSError:
+          else:
             # Darn, the directory prob already exists. 
             name_counter += 1
           
@@ -93,15 +93,15 @@ class Application(Frame):
           if r.scan_mode == "FixedAnalyzerTransmission":
             data[:,0] = r.binding_axis
             x = r.binding_axis
-            hdr_string += "Binding energy (eV)    "
+            hdr_string += "Binding_energy_(eV)    "
           elif r.scan_mode == "ConstantFinalState":
             data[:,0] = r.excitation_axis
             x = r.excitation_axis
-            hdr_string += "Photon energy (eV)    "
+            hdr_string += "Photon_energy_(eV)    "
           else:
             data[:,0] = r.kinetic_axis
             x = r.kinetic_axis
-            hdr_string += "Kinetic energy (eV)    "
+            hdr_string += "Kinetic_energy_(eV)    "
           
           data[:,1] = r.counts
           y = r.counts
@@ -109,11 +109,11 @@ class Application(Frame):
           if have_nine_channels:
             data[:,2:chan_out_idx] = r.channel_counts
             for i in range(2,chan_out_idx):
-              hdr_string += "Channeltron #%d    " % (i-1)
+              hdr_string += "Channeltron_#%d    " % (i-1)
           if r.extended_channels is not None:
             data[:,ex_out_sidx:ex_out_fidx] = r.extended_channels
             for i in range(1,ex_out_fidx-ex_out_sidx+1):
-              hdr_string += "Extended Channel #%d    " % (i)
+              hdr_string += "Extended_Channel_#%d    " % (i)
             # Need to check for divide-by-zero here
             try:
               data[:,ex_out_fidx] = r.counts / r.extended_channels[:,2]
@@ -138,7 +138,7 @@ class Application(Frame):
           # 5. Subtract the Shirley background (gives y2).
           
           # Have to check for a zero-division here. If we encounter one,
-          # don't normalize against the pre-edge.
+          # don't normalize agaif,;lnst the pre-edge.
           try:
             L = specs.preedge_calculate(x,y)
             y1 = (y - L) / L[x.argmin()]
@@ -153,14 +153,30 @@ class Application(Frame):
             data[:,-3] = 1.0
             data[:,-2] = specs.shirley_calculate(x,y - data[:,-4])
             data[:,-1] = y - data[:,-4] - data[:,-2]
-          hdr_string += "Preedge    Shirley    Counts-Preedge-Shirley    "
+          hdr_string += "Preedge    Scale_Division    Shirley    Counts-Preedge-Shirley    "
+          
+          # As before, there are possible filename conflicts because there is 
+          # no requirement that SPECS region names be unique.
+          have_name = False
+          name_counter = 0
+          while not have_name:
+            if name_counter == 0:
+              r_write_name = r.name + ".xy"
+            else:
+              r_write_name = r.name + "-" + str(name_counter) + ".xy"
+            if not os.path.exists(r_write_name):  
+              have_name = True
+              name_counter = 0
+            else:
+              # Darn, the directory prob already exists. 
+              name_counter += 1
           
           try:
-            savetxt(r.name+".xy", data,header=hdr_string)
+            savetxt(r_write_name, data,header=hdr_string)
           except TypeError:
             # Numpy version not recent enough for the header option.
             print ("""Your numpy version (%s) is not recent enough to support the\nheader option in savetxt: upgrade to a version >= 1.7 to get\nthis functionality.""" % (npyversion))
-            savetxt(r.name+".xy", data)
+            savetxt(r_write_name, data)
             
         os.chdir(unpack_path)
       
