@@ -34,6 +34,13 @@
 #    end of the file after the classes. These are tuned to work with the outputs
 #    of SPECS but will work more generally if necessary.
 #
+# 4. The fundamental issue to deal with here is that there are different
+#    versions of the SPECS XML format (1.3 and 1.6 are the most prevalent as of
+#    the 1st of October 2012) and they store the data in slightly different
+#    ways. So we often don't pull things directly from the XML tree by position
+#    but rather we search for them or iterate through a list and check props 
+#    before we act on a given element.
+#
 ################################################################################
 
 from __future__ import division
@@ -67,11 +74,18 @@ class SPECS:
     tree = ET.ElementTree(file=filename)
     self.xmlroot = tree.getroot()
     
+    # The version impacts on properties of the document so we need to read it
+    # here.
+    self.xmlversion = self.xmlroot.get('version')
+    
     # For convenience, store groups as a list and provide a member function
     # to access by name - same for regions.
     self.groups = []
     for group in list(self.xmlroot[0]):
-      self.groups.append(SPECSGroup(group))
+      # All the subelements will be individual groups (called a RegionGroup in
+      # SPECS parlance) but we must check in case the file format changes.
+      if group.get('type_name') == "RegionGroup":
+        self.groups.append(SPECSGroup(group))
     
 
 class SPECSGroup:
@@ -86,7 +100,8 @@ class SPECSGroup:
     
     self.regions = []
     for region in list(xmlgroup[1]):
-      self.regions.append(SPECSRegion(region))
+      if region.get('type_name') == "RegionData":
+        self.regions.append(SPECSRegion(region))
     
 class SPECSRegion:
   """ Encapsulates a "RegionData" struct from the SPECS XML format. """
@@ -99,6 +114,8 @@ class SPECSRegion:
     self.raw_counts = []
     self.scaling_factors = []
     self.extended_channels = []
+    
+    
     for elem in xmlregion.iter('sequence'):
       if elem.attrib['type_name'] == "CountsSeq":
         tmp = array([int(x) for x in elem[0].text.split()])
