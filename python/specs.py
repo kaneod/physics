@@ -26,6 +26,9 @@
 # NOTES
 #
 # 1. I hate XML!
+# 
+# 1b. This is version 2 of the library - I have tried to be more version-
+#    agnostic in the XML parsing here so we aren't as sensitive to file format.
 #
 # 2. This library is not complete - plan is to incrementally add more member
 #    elements to the classes as necessary.
@@ -48,7 +51,7 @@ import xml.etree.ElementTree as ET
 from numpy import array, linspace, zeros, ceil, amax, amin, argmax, argmin, abs
 from numpy import polyfit, polyval, seterr
 from numpy.linalg import norm
-from scipy.interpolate import UnivariateSpline
+from scipy.interpolate import interp1d
 
 DEBUG = 1
 
@@ -115,26 +118,37 @@ class SPECSRegion:
     self.scaling_factors = []
     self.extended_channels = []
     
+    # First grab the counts for this region: this is the most important part.
+    # The counts can't be used directly as they incorporate all nine channels
+    # in a single array and need to be chopped and aligned first.
+    # Improvement from v1: we search directly for the named sequence rather 
+    # than iterating generally.
+    for elem in xmlregion.findall(".//sequence[@type_name='CountsSeq']"):
+      self.raw_counts.append(array([int(x) for x in elem[0].text.split()]))
     
-    for elem in xmlregion.iter('sequence'):
-      if elem.attrib['type_name'] == "CountsSeq":
-        tmp = array([int(x) for x in elem[0].text.split()])
-        self.raw_counts.append(tmp)
-      elif elem.attrib['name'] == "scaling_factors":
-        tmp = array([float(x) for x in elem[0].text.split()])
-        self.scaling_factors.append(tmp)
-      elif elem.attrib['type_name'] == "YCurveSeq":
-        # Here we need to iterate through the sub-element YCurveSeq
-        # to grab the extended channels if they are present.
-        for ycurve in elem:
-          if "Extended Channel" in ycurve[0].text:
-            for channel in ycurve.iter('sequence'):
-              if channel.attrib['name'] == "data":
-                tmp = array([float(x) for x in channel[0].text.split()])
-                self.extended_channels.append(tmp)
+    # Scaling factors for the counts.
+    for elem in xmlregion.findall(".//sequence[@name='scaling_factors']"):
+      self.scaling_factors.append(array([float(x) for x in elem[0].text.split()]))
+    
+    # Look for Extended Channels in a YCurveSeq set.
+    for ycs in xmlregion.findall(".//sequence[@type_name='YCurveSeq']"):
+      for ycurve in ycs:
+        if "Extended Channel" in ycurve[0].text:
+          for channel in ycurve.iter('sequence'):
+            if channel.attrib['name'] == "data":
+              tmp = array([float(x) for x in channel[0].text.split()])
+              self.extended_channels.append(tmp)
+              
+    # Grab the transmission function. This is *not* to be trusted but SPECS 
+    # might implicitly use it for display within the SPECS program itself so
+    # we need to read it.
+    trans = xmlregion.find(".//sequence[@name='transmission']")
+    self.transmission = array([float(x) for x in trans[0].text.split()])
     
     # Iterate over all the elements in the RegionDef struct.
-    for elem in xmlregion[1].iter():
+    # Note: should ONLY BE ONE of these, so use find rather than findall.
+    rdef = xmlregion.find(".//struct[@type_name='RegionDef']")
+    for elem in rdef:
       if elem.attrib['name'] == "scan_mode":
         self.scan_mode = elem[0].text
       elif elem.attrib['name'] == "dwell_time":
@@ -163,14 +177,16 @@ class SPECSRegion:
     
     # MCD head and tail are the extra elements added to the beginning and
     # end of the scan.
-    self.mcd_head = int(xmlregion[2].text)
-    self.mcd_tail = int(xmlregion[3].text)
+    self.mcd_head = int(xmlregion.find(".//*[@name='mcd_head']").text)
+    self.mcd_tail = int(xmlregion.find(".//*[@name='mcd_tail']").text)
     
-    # Detector channel offsets are in the 5th subelement of the region.
+    # Get the detector information for the energy position of each channeltron.
     self.detector_channel_shifts = []
     self.detector_channel_positions = []
     self.detector_channel_gains = []
-    for elem in xmlregion[4].iter('struct'):
+    
+    detectors = xmlregion.find(".//sequence[@type_name='DetectorSeq']")
+    for elem in detectors:
       if elem.attrib['type_name'] == "Detector":
         for subelem in elem.iter():
           if "name" in subelem.attrib.keys():
@@ -188,26 +204,47 @@ class SPECSRegion:
     # Use the pass energy to calculate detector calibration.
     self.detector_channel_offsets = self.pass_energy * self.detector_channel_shifts
     
-    # Use interpolators to overlay the 9 detector channels and sum.
+    # We now need to interpolate the separate channeltrons onto the proper
+    # kinetic axis and the not the extended one we define below. So, set
+    # up some arrays...
     self.counts = zeros((self.values_per_curve))
     self.channel_counts = zeros((self.values_per_curve, len(self.detector_channel_offsets)))
     
     num_detectors = len(self.detector_channel_offsets)
+    
+    # Use the MCD head and tail to make an extended axis for use in aligning
+    # the channeltrons.
+    ex_lower = self.kinetic_energy - self.mcd_head * self.scan_delta
+    ex_upper = ke_upper + self.mcd_tail * self.scan_delta
+    num_points = self.values_per_curve + self.mcd_head + self.mcd_tail
+    self.extended_axis = linspace(ex_lower, ex_upper, num_points)
+    
+    # Now construct 
     for c in self.raw_counts:
       if DEBUG:
         print self.name, len(c)
-      for i,s in enumerate(self.detector_channel_offsets):
-        y = c[i:len(c):num_detectors]
-        x = self.kinetic_axis + self.detector_channel_offsets[i]
-        # Note use of mcd_head and mcd_tail here.
-        if self.mcd_tail == 0:
-          s = UnivariateSpline(x, y[self.mcd_head:len(y)],k=1)
-        else:
-          s = UnivariateSpline(x, y[self.mcd_head:-self.mcd_tail], k=1)
-        self.counts += array([s(t) for t in x])
-        self.channel_counts[:,i] = array([s(t) for t in x])
+      for i in range(num_detectors):
+        # :: is not a mistake, shorthand for start:finish:step when we want to
+        # finish at the end of the array.
+        y = c[i::num_detectors]
+        x = self.extended_axis + self.detector_channel_offsets[i]
+        # We don't want bounds errors on our interpolators. These should not
+        # occur anyway because of the way SPECS sets up the extra points in the
+        # extended axis.
+        s = interp1d(x, y, bounds_error=False, fill_value=0.0)
+        # Now interpolate onto the kinetic_axis for the total counts (all
+        # channels added together) and for the separate channels. The practical
+        # effect is to energy-shift each channeltron and chop the energy
+        # range so all channeltron spectra are over the same axis.
+        self.counts += array([s(t) for t in self.kinetic_axis])
+        self.channel_counts[:,i] = array([s(t) for t in self.kinetic_axis])
     
-    # Trim the extended channels if they are present.
+    # Trim the extended channels if they are present. There should not be any
+    # calibration issue here - SPECS just treats the extended channels as if 
+    # they are channeltrons and therefore gives them extra data points on either
+    # side as indicated by MCD head and tail. One could leave the extra points
+    # in without any hassle but you would then not match the actual excitation
+    # or kinetic energy range specified by the end-user.
     for i in range(len(self.extended_channels)):
       if self.mcd_tail == 0:
         c = self.extended_channels[i]
