@@ -49,7 +49,7 @@
 from __future__ import division
 import xml.etree.ElementTree as ET
 from numpy import array, linspace, zeros, ceil, amax, amin, argmax, argmin, abs
-from numpy import polyfit, polyval, seterr
+from numpy import polyfit, polyval, seterr, trunc
 from numpy.linalg import norm
 from scipy.interpolate import interp1d
 
@@ -204,6 +204,20 @@ class SPECSRegion:
     # Use the pass energy to calculate detector calibration.
     self.detector_channel_offsets = self.pass_energy * self.detector_channel_shifts
     
+    # Calculate so and si (based on the SPECS document "Acquiring Data with
+    # Multidetector systems").
+    so = self.detector_channel_offsets[-1]
+    si = self.detector_channel_offsets[0]
+    h = trunc(so / self.scan_delta + 0.5)
+    t = trunc(-si / self.scan_delta + 0.5)
+    H = h * self.scan_delta
+    T = t * self.scan_delta
+    
+    if DEBUG:
+      print "Scanned range is:", amin(self.kinetic_energy), amax(self.kinetic_energy)
+      print "Extended range is:", amin(self.kinetic_energy) - so, amax(self.kinetic_energy) - si
+      print "h, t, H, T are ", h, t, H, T
+    
     # We now need to interpolate the separate channeltrons onto the proper
     # kinetic axis and the not the extended one we define below. So, set
     # up some arrays...
@@ -212,32 +226,62 @@ class SPECSRegion:
     
     num_detectors = len(self.detector_channel_offsets)
     
-    # Use the MCD head and tail to make an extended axis for use in aligning
-    # the channeltrons.
-    ex_lower = self.kinetic_energy - self.mcd_head * self.scan_delta
-    ex_upper = ke_upper + self.mcd_tail * self.scan_delta
-    num_points = self.values_per_curve + self.mcd_head + self.mcd_tail
-    self.extended_axis = linspace(ex_lower, ex_upper, num_points)
-    
-    # Now construct 
+    # Use the SPECS nearest-neighbour method to recombine the channeltron
+    # spectra after extraction from the raw_counts array.
     for c in self.raw_counts:
-      if DEBUG:
-        print self.name, len(c)
+      tmp_channels = []
+      tmp_indices = []
+      tmp_E = self.kinetic_axis[0] # This is E1 from the SPECS document
       for i in range(num_detectors):
-        # :: is not a mistake, shorthand for start:finish:step when we want to
-        # finish at the end of the array.
-        y = c[i::num_detectors]
-        x = self.extended_axis + self.detector_channel_offsets[i]
-        # We don't want bounds errors on our interpolators. These should not
-        # occur anyway because of the way SPECS sets up the extra points in the
-        # extended axis.
-        s = interp1d(x, y, bounds_error=False, fill_value=0.0)
-        # Now interpolate onto the kinetic_axis for the total counts (all
-        # channels added together) and for the separate channels. The practical
-        # effect is to energy-shift each channeltron and chop the energy
-        # range so all channeltron spectra are over the same axis.
-        self.counts += array([s(t) for t in self.kinetic_axis])
-        self.channel_counts[:,i] = array([s(t) for t in self.kinetic_axis])
+        # Pull out the individual channel spectrum
+        tmp_channels.append(c[i::num_detectors])
+        # Note we have to *reverse* the channel offsets here based on the sign
+        # convention in the SPECS document.
+        tmp_indices.append(trunc(h + self.detector_channel_offsets[::-1][i] / self.scan_delta + 0.5))
+      if DEBUG:
+        print "Starting indices are: ", tmp_indices
+      # Now tmp_channels[j][k] is the kth value of the jth channeltron. 
+      # We map these channeltrons together by using the index offsets in
+      # the tmp_indices list which is incremented every j cycle.
+      for i in range(self.values_per_curve):
+        for j in range(num_detectors):
+          self.counts[i] += tmp_channels[j][tmp_indices[j]]
+          self.channel_counts[i,j] += tmp_channels[j][tmp_indices[j]]
+          tmp_indices[j] += 1
+       
+    #for c in self.raw_counts:
+    #  if DEBUG:
+    #    print self.name, len(c)
+    #  for i in range(num_detectors):
+    #    # :: is not a mistake, shorthand for start:finish:step when we want to
+    #    # finish at the end of the array.
+    #    y = c[i::num_detectors]
+    #    x = self.extended_axis + self.detector_channel_offsets[i]
+    #    
+    #    if DEBUG:
+    #      print "Constructing interpolators: interp range is ", amin(x), amax(x)
+    #      print "Kinetic energy axis range is ", amin(self.kinetic_axis), amax(self.kinetic_axis)
+    #    # There are sometimes slight energy alignment problems with this axis
+    #    # (the subsequent interpolation has strict boundary requirements for
+    #    # numerical integrity reasons - we don't want to interpolate outside the
+    #    # known range). We correct by forcing the highest energy in the axis to
+    #    # be an exact multiple of the scan step size. This is a very small (3rd
+    #    # or 4th decimal place) correction, well smaller than the resolution
+    #    # of the instrument.roun
+    #    shift = self.scan_delta * ceil(amax(x) / self.scan_delta) - amax(x)
+    #    x += shift
+    #    
+    #    if DEBUG:
+    #      print "Corrected interpolator range is ", amin(x), amax(x)  
+    #    # We might get requested interpolators
+    #    s = interp1d(x,y)      
+    #    #s = interp1d(x, y, bounds_error=False, fill_value=0.0)
+    #    # Now interpolate onto the kinetic_axis for the total counts (all
+    #    # channels added together) and for the separate channels. The practical
+    #    # effect is to energy-shift each channeltron and chop the energy
+    #    # range so all channeltron spectra are over the same axis.
+    #    self.counts += array([s(t) for t in self.kinetic_axis])
+    #    self.channel_counts[:,i] += array([s(t) for t in self.kinetic_axis])
     
     # Trim the extended channels if they are present. There should not be any
     # calibration issue here - SPECS just treats the extended channels as if 
