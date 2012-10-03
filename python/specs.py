@@ -54,6 +54,7 @@ from numpy.linalg import norm
 from scipy.interpolate import interp1d
 
 DEBUG = 1
+OPTION = 2
 
 # We do not allow divide by zeros at all: raise an error if it happens.
 seterr(divide='raise')
@@ -174,7 +175,7 @@ class SPECSRegion:
     # Excitation axis (for NEXAFS)
     exc_upper = self.excitation_energy + (self.values_per_curve - 1) * self.scan_delta
     self.excitation_axis = linspace(self.excitation_energy, exc_upper, self.values_per_curve)
-    
+  
     # MCD head and tail are the extra elements added to the beginning and
     # end of the scan.
     self.mcd_head = int(xmlregion.find(".//*[@name='mcd_head']").text)
@@ -196,7 +197,7 @@ class SPECSRegion:
               self.detector_channel_shifts.append(float(subelem.text))
             if subelem.attrib['name'] == 'gain':
               self.detector_channel_gains.append(float(subelem.text))
-    
+   
     self.detector_channel_shifts = array(self.detector_channel_shifts)
     self.detector_channel_positions = array(self.detector_channel_positions)
     self.detector_channel_gains = array(self.detector_channel_gains)
@@ -204,50 +205,79 @@ class SPECSRegion:
     # Use the pass energy to calculate detector calibration.
     self.detector_channel_offsets = self.pass_energy * self.detector_channel_shifts
     
-    # Calculate so and si (based on the SPECS document "Acquiring Data with
-    # Multidetector systems").
-    so = self.detector_channel_offsets[-1]
-    si = self.detector_channel_offsets[0]
-    h = trunc(so / self.scan_delta + 0.5)
-    t = trunc(-si / self.scan_delta + 0.5)
-    H = h * self.scan_delta
-    T = t * self.scan_delta
-    
-    if DEBUG:
-      print "Scanned range is:", amin(self.kinetic_energy), amax(self.kinetic_energy)
-      print "Extended range is:", amin(self.kinetic_energy) - so, amax(self.kinetic_energy) - si
-      print "h, t, H, T are ", h, t, H, T
-    
-    # We now need to interpolate the separate channeltrons onto the proper
-    # kinetic axis and the not the extended one we define below. So, set
-    # up some arrays...
-    self.counts = zeros((self.values_per_curve))
-    self.channel_counts = zeros((self.values_per_curve, len(self.detector_channel_offsets)))
-    
     num_detectors = len(self.detector_channel_offsets)
     
+    # Now, we need to know the analyzer mode, because how we add the channeltron data
+    # together depends on whether we are sweeping the kinetic energy in the analyzer or
+    # not.
+    scanmode = xmlregion.find(".//struct[@type_name='ScanMode']")
+    self.scan_mode = scanmode[0].text
+    
+    # Calculate so and si (based on the SPECS document "Acquiring Data with
+    # Multidetector systems"). Don't really need si or t.
+    so = self.detector_channel_offsets[-1]
+    #si = self.detector_channel_offsets[0]
+    h = int(trunc(so / self.scan_delta + 0.5))
+    #t = int(trunc(-si / self.scan_delta + 0.5))
+    
+    # Now use the h value to calculate the index offsets for each of the channels.
+    # (This isn't used for ConstantFinalState)
+    start_energies = []
+    for i in range(num_detectors):
+      start_energies.append(self.kinetic_energy - h * self.scan_delta + self.detector_channel_offsets[i])
+    idxs = []
+    for i in range(num_detectors):
+      idxs.append(int(trunc((self.kinetic_energy - start_energies[i]) / self.scan_delta + 0.5)))    
+    
+    # We now need to separate the raw counts into channels and assign each counts value
+    # to a nominal energy value again according to the SPECS document referenced above,
+    # using the "Nearest-Neighbour" method.
+    self.counts = zeros((self.values_per_curve))
+    self.channel_counts = zeros((self.values_per_curve, len(self.detector_channel_offsets)))
+  
+    for c in self.raw_counts:
+      tmp_channels = []   
+      for i in range(num_detectors):
+        tmp_channels.append(c[i::9])
+      if self.scan_mode == "ConstantFinalState":
+        for i in range(num_detectors):
+          self.counts += array(tmp_channels[i])
+          self.channel_counts[:,i] += array(tmp_channels[i])
+      else:
+        for i in range(self.values_per_curve):
+          for j in range(num_detectors):
+            try:
+              self.counts[i] += tmp_channels[j][i + idxs[j]]
+              self.channel_counts[i, j] += tmp_channels[j][i + idxs[j]]
+            except IndexError:
+              print "SPECSRegion: Darn, an index error unpacking the channeltron data. This was not supposed to happen!"
+                
     # Use the SPECS nearest-neighbour method to recombine the channeltron
     # spectra after extraction from the raw_counts array.
-    for c in self.raw_counts:
-      tmp_channels = []
-      tmp_indices = []
-      tmp_E = self.kinetic_axis[0] # This is E1 from the SPECS document
-      for i in range(num_detectors):
-        # Pull out the individual channel spectrum
-        tmp_channels.append(c[i::num_detectors])
-        # Note we have to *reverse* the channel offsets here based on the sign
-        # convention in the SPECS document.
-        tmp_indices.append(trunc(h + self.detector_channel_offsets[::-1][i] / self.scan_delta + 0.5))
-      if DEBUG:
-        print "Starting indices are: ", tmp_indices
-      # Now tmp_channels[j][k] is the kth value of the jth channeltron. 
-      # We map these channeltrons together by using the index offsets in
-      # the tmp_indices list which is incremented every j cycle.
-      for i in range(self.values_per_curve):
-        for j in range(num_detectors):
-          self.counts[i] += tmp_channels[j][tmp_indices[j]]
-          self.channel_counts[i,j] += tmp_channels[j][tmp_indices[j]]
-          tmp_indices[j] += 1
+    #for c in self.raw_counts:
+    #  tmp_channels = []
+    #  tmp_indices = []
+    #  tmp_E = self.kinetic_axis[0] # This is E1 from the SPECS document
+    #  for i in range(num_detectors):
+    #    # Pull out the individual channel spectrum
+    #    tmp_channels.append(c[i::num_detectors])
+    #    # Note we have to *reverse* the channel offsets here based on the sign
+    #    # convention in the SPECS document.
+    #    tmp_indices.append(trunc(h + self.detector_channel_offsets[::-1][i] / self.scan_delta + 0.5))
+    #  if DEBUG:
+    #    print "Starting indices are: ", tmp_indices
+    #  # Now tmp_channels[j][k] is the kth value of the jth channeltron. 
+    #  # We map these channeltrons together by using the index offsets in
+    #  # the tmp_indices list which is incremented every j cycle.
+    #  for i in range(self.values_per_curve):
+    #    if DEBUG:
+    #      print "---------------- Energy index %d %f ------------------" % (i, self.kinetic_axis[i])
+    #    for j in range(num_detectors):
+    #      if DEBUG:
+    #        print "tmp index: ", tmp_indices[j], len(tmp_channels[j])
+    #      self.counts[i] += tmp_channels[j][tmp_indices[j]]
+    #      self.channel_counts[i,j] += tmp_channels[j][tmp_indices[j]]
+    #      tmp_indices[j] += 1
        
     #for c in self.raw_counts:
     #  if DEBUG:
