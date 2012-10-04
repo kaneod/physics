@@ -49,7 +49,7 @@
 from __future__ import division
 import xml.etree.ElementTree as ET
 from numpy import array, linspace, zeros, ceil, amax, amin, argmax, argmin, abs
-from numpy import polyfit, polyval, seterr, trunc
+from numpy import polyfit, polyval, seterr, trunc, mean
 from numpy.linalg import norm
 from scipy.interpolate import interp1d
 
@@ -390,8 +390,12 @@ def preedge_calculate(x,y):
     # Best linear fit to the last i values
     xs = x[-i:]
     ys = y[-i:]
-    p = polyfit(xs,ys,1)
-    grads.append(p[0])
+    #p = polyfit(xs,ys,1)
+    #grads.append(p[0])
+    # Try a new algorithm that should be faster than polyfit
+    xs = xs - mean(xs)
+    ys = ys - mean(ys)
+    grads.append((xs * ys).sum() / (xs * xs).sum())
     
   # Differentiate the gradient array.
   dgrads = []
@@ -418,8 +422,8 @@ def preedge_calculate(x,y):
   else:
     return polyval(p,x)
   
-def shirley_calculate(x,y, tol=1e-6, maxit=20):
-  """ S = specs.shirley_calculate(x,y, tol=1e-6)
+def shirley_calculate(x,y, tol=1e-5, maxit=10):
+  """ S = specs.shirley_calculate(x,y, tol=1e-5, maxit=10)
   
   Calculate the best auto-Shirley background S for a dataset (x,y). Finds the biggest peak 
   and then uses the minimum value either side of this peak as the terminal points of the
@@ -475,7 +479,9 @@ def shirley_calculate(x,y, tol=1e-6, maxit=20):
   Bnew = B.copy()
   
   it = 0
-  while it < maxit:  
+  while it < maxit: 
+    if DEBUG:
+      print "Shirley iteration: ", it 
     # Calculate new k = (yl - yr) / (int_(xl)^(xr) J(x') - yr - B(x') dx')
     ksum = 0.0
     for i in range(lmidx,imax):

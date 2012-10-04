@@ -204,6 +204,7 @@ class Application(Frame):
         newdata = self.process_xy(data, normfiledata)
         
         if newdata is not None:
+          outdata = self.pre_edge_substract(newdata)
           newfname = path.rstrip(".xy") + "-normed.xy"
           savetxt(newfname, newdata)
      

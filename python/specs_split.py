@@ -124,6 +124,8 @@ class Application(Frame):
               data[:,ex_out_fidx] = r.counts
               y = r.counts
               hdr_string += "Counts    "
+          else:
+            print "Extended channels are not present: No I0 normalization."
           # The order of operations here is:
           # 
           # 1. Calculate the linear pre-edge (gives L).
@@ -137,22 +139,37 @@ class Application(Frame):
           # 4. Calculate Shirley background using this new spectrum (gives S).
           # 5. Subtract the Shirley background (gives y2).
           
+          # We really want to only do this stuff for XPS scans: if the analyzer mode is
+          # not in FixedAnalyzerTransmission these extra columns will be zeroed. Strictly
+          # speaking, we should also allow this for FRR mode (FixedRetardingRatio) but
+          # since the input routine doesn't account for FRR properly yet there isn't
+          # much point.
+          
           # Have to check for a zero-division here. If we encounter one,
-          # don't normalize agaif,;lnst the pre-edge.
-          try:
-            L = specs.preedge_calculate(x,y)
-            y1 = (y - L) / L[x.argmin()]
-            S = specs.shirley_calculate(x,y1)
-            y2 = y1 - S
-            data[:,-4] = L
-            data[:,-3] = L[x.argmin()]
-            data[:,-2] = S
-            data[:,-1] = y2
-          except FloatingPointError:
-            data[:,-4] = specs.preedge_calculate(x,y)
-            data[:,-3] = 1.0
-            data[:,-2] = specs.shirley_calculate(x,y - data[:,-4])
-            data[:,-1] = y - data[:,-4] - data[:,-2]
+          # don't normalize against the pre-edge.
+          print "Scan mode is: ", r.scan_mode
+          if r.scan_mode == "FixedAnalyzerTransmission":
+            print "FixedAnalyzerTransmission mode detected: attempting pre-edge and Shirley subtraction."
+            try:
+              L = specs.preedge_calculate(x,y)
+              y1 = (y - L) / L[x.argmin()]
+              S = specs.shirley_calculate(x,y1)
+              y2 = y1 - S
+              data[:,-4] = L
+              data[:,-3] = L[x.argmin()]
+              data[:,-2] = S
+              data[:,-1] = y2
+            except FloatingPointError:
+              data[:,-4] = specs.preedge_calculate(x,y)
+              data[:,-3] = 1.0
+              data[:,-2] = specs.shirley_calculate(x,y - data[:,-4])
+              data[:,-1] = y - data[:,-4] - data[:,-2]
+          else:
+            blank = zeros((r.values_per_curve))
+            data[:,-4] = blank
+            data[:,-3] = blank
+            data[:,-2] = blank
+            data[:,-1] = blank
           hdr_string += "Preedge    Scale_Division    Shirley    Counts-Preedge-Shirley    "
           
           # As before, there are possible filename conflicts because there is 
