@@ -239,7 +239,11 @@ class SPECSRegion:
       tmp_channels = []   
       for i in range(num_detectors):
         tmp_channels.append(c[i::9])
-      if self.scan_mode == "ConstantFinalState":
+      # IMPORTANT: If FixedAnalyzerTransmission or FixedRetardingRatio, we need to use
+      # the nearest-neighbour method to align the channeltron energies. I have only
+      # implemented the method for FixedAnalyzerTransission at the moment - the FRR 
+      # implementation is different and rather more difficult and no one ever uses it.
+      if self.scan_mode != "FixedAnalyzerTransmission":
         for i in range(num_detectors):
           self.counts += array(tmp_channels[i])
           self.channel_counts[:,i] += array(tmp_channels[i])
