@@ -204,11 +204,19 @@ class Application(Frame):
         newdata = self.process_xy(data, normfiledata)
         
         if newdata is not None:
-          outdata = self.pre_edge_substract(newdata)
+          outdata = self.pre_edge_subtract(newdata)
           newfname = path.rstrip(".xy") + "-normed.xy"
           savetxt(newfname, newdata)
      
     os.chdir(olddir)
+    
+  def pre_edge_subtract(self, data):
+    """ Fit a linear pre-edge and subtract it.
+    
+    """
+    
+    # The trick here, unlike with XPS data, is that we can't just use the location of the
+    # XPS peak to delineate the pre-edge region.
       
   def process_xy(self, data, normdata):
   

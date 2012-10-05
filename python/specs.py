@@ -143,8 +143,8 @@ class SPECSRegion:
     # Grab the transmission function. This is *not* to be trusted but SPECS 
     # might implicitly use it for display within the SPECS program itself so
     # we need to read it.
-    trans = xmlregion.find(".//sequence[@name='transmission']")
-    self.transmission = array([float(x) for x in trans[0].text.split()])
+    #trans = xmlregion.find(".//sequence[@name='transmission']")
+    #self.transmission = array([float(x) for x in trans[0].text.split()])
     
     # Iterate over all the elements in the RegionDef struct.
     # Note: should ONLY BE ONE of these, so use find rather than findall.
@@ -215,9 +215,12 @@ class SPECSRegion:
     
     # Calculate so and si (based on the SPECS document "Acquiring Data with
     # Multidetector systems"). Don't really need si or t.
-    so = self.detector_channel_offsets[-1]
+    try:
+      so = self.detector_channel_offsets[-1]
     #si = self.detector_channel_offsets[0]
-    h = int(trunc(so / self.scan_delta + 0.5))
+      h = int(trunc(so / self.scan_delta + 0.5))
+    except IndexError:
+      print "IndexError in unpacking: ", num_detectors
     #t = int(trunc(-si / self.scan_delta + 0.5))
     
     # Now use the h value to calculate the index offsets for each of the channels.
