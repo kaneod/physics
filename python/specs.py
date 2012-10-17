@@ -143,8 +143,16 @@ class SPECSRegion:
     # Grab the transmission function. This is *not* to be trusted but SPECS 
     # might implicitly use it for display within the SPECS program itself so
     # we need to read it.
-    #trans = xmlregion.find(".//sequence[@name='transmission']")
-    #self.transmission = array([float(x) for x in trans[0].text.split()])
+    trans = xmlregion.find(".//sequence[@name='transmission']")
+    if trans is not None and len(trans) > 0:
+      try:
+        self.transmission = array([float(x) for x in trans[0].text.split()])
+      except ValueError:
+        # SPECS sometimes says the transmission is "Infinity", obviously not a 
+        # useful number so we explicitly set the transmission to be None here.
+        self.transmission = None
+    else:
+      self.transmission = None
     
     # Iterate over all the elements in the RegionDef struct.
     # Note: should ONLY BE ONE of these, so use find rather than findall.
