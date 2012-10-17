@@ -86,8 +86,9 @@ class Application(Frame):
             ex_out_fidx = ex_out_sidx + 9
           # For now, automatically add the shirley and linear subtractions.
           # Eventually this will be an option.
-          num_outputs += 4 # Linear preedge, background
-          # scaling factor, shirley and counts - L - S.
+          num_outputs += 5 # Linear preedge, background
+                           # scaling factor, shirley, counts - L - S and
+                           # (counts - L - S) / I0.
           data = zeros((r.values_per_curve,num_outputs))
           hdr_string = ""
           if r.scan_mode == "FixedAnalyzerTransmission":
@@ -117,12 +118,14 @@ class Application(Frame):
             # Need to check for divide-by-zero here
             try:
               data[:,ex_out_fidx] = r.counts / r.extended_channels[:,2]
-              y = r.counts / r.extended_channels[:,2]
+              # Removed the normalization here because we want un-normalized y for the
+              # pre-edge fitting.
+              #y = r.counts / r.extended_channels[:,2]
               hdr_string += "Counts/I0    "
             except FloatingPointError:
               print "Divide by zero in I0 channel: skipping I0 normalization."
               data[:,ex_out_fidx] = r.counts
-              y = r.counts
+              #y = r.counts
               hdr_string += "Counts    "
           else:
             print "Extended channels are not present: No I0 normalization."
@@ -138,6 +141,11 @@ class Application(Frame):
           #    (We skip if the background is zero or contains zeros)
           # 4. Calculate Shirley background using this new spectrum (gives S).
           # 5. Subtract the Shirley background (gives y2).
+          # 6. Divide by I0 if present. We don't want to take y to be the normalized
+          #    spectrum to start with because the linear pre-edge fit is not robust
+          #    in those circumstances. Note this means we get TWO normalized spectra
+          #    in the file - one column before all the automatic stuff and one at the very
+          #    last column.
           
           # We really want to only do this stuff for XPS scans: if the analyzer mode is
           # not in FixedAnalyzerTransmission these extra columns will be zeroed. Strictly
@@ -146,31 +154,39 @@ class Application(Frame):
           # much point.
           
           # Have to check for a zero-division here. If we encounter one,
-          # don't normalize against the pre-edge.
+          # don't normalize against the pre-edge or divide by I0.
           print "Scan mode is: ", r.scan_mode
           if r.scan_mode == "FixedAnalyzerTransmission":
             print "FixedAnalyzerTransmission mode detected: attempting pre-edge and Shirley subtraction."
             try:
-              L = specs.preedge_calculate(x,y)
+              L = specs.preedge_calculate(x,y)             
               y1 = (y - L) / L[x.argmin()]
               S = specs.shirley_calculate(x,y1)
               y2 = y1 - S
-              data[:,-4] = L
-              data[:,-3] = L[x.argmin()]
-              data[:,-2] = S
-              data[:,-1] = y2
+              data[:,-5] = L
+              data[:,-4] = L[x.argmin()]
+              data[:,-3] = S
+              data[:,-2] = y2
+              if r.extended_channels is not None:
+                data[:,-1] = y2 / r.extended_channels[:,2]
+              else:
+                if DEBUG: 
+                  print "Warning: No normalization output for this region!"
+                data[:,-1] = y2
             except FloatingPointError:
-              data[:,-4] = specs.preedge_calculate(x,y)
-              data[:,-3] = 1.0
-              data[:,-2] = specs.shirley_calculate(x,y - data[:,-4])
-              data[:,-1] = y - data[:,-4] - data[:,-2]
+              data[:,-5] = specs.preedge_calculate(x,y)
+              data[:,-4] = 1.0
+              data[:,-3] = specs.shirley_calculate(x,y - data[:,-5])
+              data[:,-2] = y - data[:,-5] - data[:,-3]
+              data[:,-1] = y - data[:,-5] - data[:,-3]
           else:
             blank = zeros((r.values_per_curve))
+            data[:,-5] = blank
             data[:,-4] = blank
             data[:,-3] = blank
             data[:,-2] = blank
             data[:,-1] = blank
-          hdr_string += "Preedge    Scale_Division    Shirley    Counts-Preedge-Shirley    "
+          hdr_string += "Preedge    Scale_Division    Shirley    Counts-Preedge-Shirley Counts-Preedge-Shirley/I0"
           
           # As before, there are possible filename conflicts because there is 
           # no requirement that SPECS region names be unique.
