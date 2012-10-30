@@ -61,39 +61,75 @@ module constants
   
 end module
 
-module core_level_spectra
+module utilities
 
   use constants
   
   implicit none
   
+  contains
+  
+  subroutine gaussian_convolute(xdata, ydata, num_points, gwidth)
+    !---------------------------------------------------------------------------
+    !
+    ! gaussian_convolute: a conventional convolution where the gaussian function
+    ! of width gwidth is the second factor in the integral.
+    !
+    !---------------------------------------------------------------------------
+    
+    integer, intent(in) :: num_points
+    real(kind=dp), intent(inout) :: xdata(num_points), ydata(num_points)
+    real(kind=dp) :: tmp(num_points), dx
+    real(kind=dp), intent(in) :: gwidth
+    integer :: i, j
+    
+    ! Assume the step is even (!!)
+    dx = xdata(2) - xdata(1)
+    
+    tmp = 0.0d0
+    
+    do i=1,num_points
+      do j=1,num_points
+        tmp(i) = tmp(i) + dx * ydata(j) * invsqrt2pi * 1.0d0 / gwidth * dexp( &
+        &        -0.5d0 * ((xdata(i) - xdata(j)) / gwidth)**2)
+      end do
+    end do
+    
+    ydata = tmp
+    
+    return
+  end subroutine
+
+end module     
+ 
+module core_level_spectra
+
+  use constants
+  use utilities
+  
+  implicit none
+  
   logical :: file_exists = .false.
-  character(len=80) :: seed, tmpstr, atstr(4)
+  character(len=80) :: seed
   
   integer :: ncproj, mbands, nkpts, nspins, tmpi, nbands(2)
   integer, dimension(:), allocatable :: core_species, core_ion, core_n, core_lm
   complex(kind=dp), dimension(:,:,:,:,:), allocatable :: optmat
-  real(kind=dp), dimension(:), allocatable :: wk
+  real(kind=dp), dimension(:), allocatable :: wk, w
   real(kind=dp), dimension(:,:), allocatable :: kpts
   real(kind=dp), dimension(:,:,:), allocatable :: eigen, spectrum
   real(kind=dp), dimension(:,:), allocatable :: lastspec
-  real(kind=dp) :: efermi(2), nelectrons(2), lvec(3,3), w_step, w
+  real(kind=dp) :: efermi(2), nelectrons(2), lvec(3,3), w_step
   real(kind=dp) :: matrix_cmpt(6), e_nks, f_nks, smear_factor
   
   ! Default settings
-  integer :: smear_method = 1 ! 0 for Lorentzian, 1 for Gaussian.
-  real(kind=dp) :: smear_width = 0.3d0 ! eV
+  real(kind=dp) :: lorentzian_width = 0.3d0 ! eV
   real(kind=dp) :: w_start = -5.0d0 ! eV
-  real(kind=dp) :: w_end = 50.0d0 
+  real(kind=dp) :: w_end = 50.0d0 ! eV
   integer :: spectrum_points = 2000
-  !logical :: scaling_prefactor = .false.
-  !real(kind=dp) :: e_core = -290.0d0 ! eV
-  !logical :: non_uniform_broadening = .false.
-  !real(kind=dp) :: smear_offset = 145.0d0 ! eV
+  real(kind=dp) :: linear_broadening = 0.0d0
+  real(kind=dp) :: gaussian_broadening = 0.3d0 ! eV
   real(kind=dp) :: smear_value = 0.0d0
-  !real(kind=dp) :: smear_intercept = 0.0d0
-  !real(kind=dp) :: smear_gradient = 0.0d0
-  !logical :: zero_fermi = .true.
     
   contains
   
@@ -101,7 +137,7 @@ module core_level_spectra
     !---------------------------------------------------------------------------
     !
     ! deallocate_all - deallocates all the allocatable arrays in the eels_mat
-    ! module.
+    ! module. Also resets default spectrum values.
     !
     !---------------------------------------------------------------------------
     
@@ -111,14 +147,32 @@ module core_level_spectra
     if (allocated(core_n)) deallocate(core_n)
     if (allocated(core_lm)) deallocate(core_lm)
     if (allocated(wk)) deallocate(wk)
+    if (allocated(w)) deallocate(w)
     if (allocated(kpts)) deallocate(kpts)
     if (allocated(eigen)) deallocate(eigen)
     if (allocated(spectrum)) deallocate(spectrum)
     if (allocated(lastspec)) deallocate(lastspec)
     
+    ! Reset defaults
+    lorentzian_width = 0.3d0 ! eV
+    w_start = -5.0d0 ! eV
+    w_end = 50.0d0 ! eV
+    spectrum_points = 2000
+    linear_broadening = 0.0d0
+    gaussian_broadening = 0.3d0 ! eV
+    smear_value = 0.0d0
+    
   end subroutine
   
   subroutine init(newseed)
+  
+    !---------------------------------------------------------------------------
+    !
+    ! init - reads in the eels_mat and bands files to populate the optical
+    ! matrix and eigenvalues as well as things like the number of atoms etc.
+    ! Call this every time you switch SEEDnames or if you change anything.
+    !
+    !---------------------------------------------------------------------------
 
     integer :: nk, orb, ns, nb, iw, icmpt
     character(len=80) :: newseed
@@ -237,6 +291,15 @@ module core_level_spectra
     end do
   
     close(200)
+    
+    ! Generate an energy axis based on w_start, w_end and spectrum_points
+    allocate(w(spectrum_points))
+    
+    w_step = (w_end - w_start) / spectrum_points
+    
+    do iw=1,spectrum_points
+      w(iw) = w_start + (iw-1)*w_step
+    end do
   
   end subroutine
   
@@ -262,10 +325,8 @@ module core_level_spectra
       end if
     end if
     
-    ! Smearing. For now, just set to a constant value.
-    smear_value = smear_width
-    
-    w_step = (w_end - w_start) / spectrum_points
+    ! By default the smearing value is just a constant width.
+    smear_value = lorentzian_width
     
     if (allocated(lastspec)) deallocate(lastspec)
     
@@ -297,17 +358,12 @@ module core_level_spectra
           end if
       
           do iw=1,spectrum_points
-            w = w_start + (iw-1)*w_step
-            
-            if (smear_method .eq. 0) then
-              ! Lorentzian
-              smear_factor = invpi * smear_value / ((e_nks - w)**2 + &
-              &              (smear_value)**2)
-            else
-              ! Gaussian
-              smear_factor = invsqrt2pi * 1.0d0 / smear_value * dexp(-0.5d0 * &
-              &              ((e_nks - w)/smear_value)**2)
-            end if 
+            smear_value = lorentzian_width + linear_broadening * w(iw)
+          
+            ! Lifetime broadening.
+            smear_factor = invpi * smear_value / ((e_nks - w(iw))**2 + &
+            &              (smear_value)**2)
+
             do icmpt=1,6
               lastspec(iw,icmpt) = lastspec(iw,icmpt) + wk(nk) * f_nks * &
               &                    matrix_cmpt(icmpt) * smear_factor
@@ -315,6 +371,11 @@ module core_level_spectra
           end do
         end do
       end do
+    end do
+    
+    ! Gaussian broadening.
+    do icmpt=1,6
+      call gaussian_convolute(w, lastspec(:,icmpt), spectrum_points, gaussian_broadening)
     end do
     
     ! Zero tiny values
