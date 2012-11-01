@@ -121,6 +121,9 @@ module core_level_spectra
   real(kind=dp), dimension(:,:), allocatable :: lastspec
   real(kind=dp) :: efermi(2), nelectrons(2), lvec(3,3), w_step
   real(kind=dp) :: matrix_cmpt(6), e_nks, f_nks, smear_factor
+  integer :: ltstate ! index of the lowest state we can transition to.
+  logical :: ltsingle ! account for singly-occupied HOMO states.
+  real(kind=dp) :: lteigen ! lowest allowed transition eigenvalue.
   
   ! Default settings
   real(kind=dp) :: lorentzian_width = 0.3d0 ! eV
@@ -130,6 +133,8 @@ module core_level_spectra
   real(kind=dp) :: linear_broadening = 0.0d0
   real(kind=dp) :: gaussian_broadening = 0.3d0 ! eV
   real(kind=dp) :: smear_value = 0.0d0
+  logical :: is_core_hole = .true.
+  real(kind=dp) :: hole_charge = 1.0d0 ! denotes a full core hole.
     
   contains
   
@@ -161,6 +166,8 @@ module core_level_spectra
     linear_broadening = 0.0d0
     gaussian_broadening = 0.3d0 ! eV
     smear_value = 0.0d0
+    is_core_hole = .true.
+    hole_charge = 1.0d0
     
   end subroutine
   
@@ -174,8 +181,9 @@ module core_level_spectra
     !
     !---------------------------------------------------------------------------
 
-    integer :: nk, orb, ns, nb, iw, icmpt
+    integer :: nk, orb, ns, nb, iw, icmpt, inumelec
     character(len=80) :: newseed
+    real(kind=dp) :: numelec
     
     inquire(file=adjustl(trim(newseed))//'.eels_mat', exist=file_exists)
     
@@ -300,6 +308,64 @@ module core_level_spectra
     do iw=1,spectrum_points
       w(iw) = w_start + (iw-1)*w_step
     end do
+    
+    ! We need to engage in some trickery here. The problem is that typically
+    ! in a core hole calculation, we have an electron sitting in what used
+    ! to be the LUMO (CBM for crystal) for the neutral pre-excited system. So,
+    ! the fermi level calculated by CASTEP is actually above where it would be
+    ! before the excitation, and if we aren't careful we exclude the transition
+    ! to the LUMO in the calculation of the spectrum. So, we need to find the
+    ! subset of bands for which we want to actually calculate the spectrum.
+    ! We do this by counting the number of fully occupied states only, and we
+    ! set the first single or zero occupancy state to be the zero for the energy
+    ! scale. 
+    !
+    ! This is *not* the conventional way of doing this! But it is a correct
+    ! way.
+    ! Four possibilities: can be corehole or non-corehole calculation in
+    ! conjunction with either an odd or even number of electrons. Here "odd"
+    ! includes any fractional values - can use a partial core hole.
+    
+    if (is_core_hole .eqv. .false.) then
+      hole_charge = 0.0d0
+    end if
+    
+    if (nspins .eq. 1) then
+      numelec = nelectrons(1)
+    else
+      numelec = nelectrons(1) + nelectrons(2)
+    end if
+    
+    ! True number of valence electrons in neutral system - must be an integer.
+    inumelec = int(numelec - hole_charge)
+    ! The lowest transition state is then integer/2 + 1
+    ltstate = inumelec / 2 + 1
+    
+    ! Most common case first: fully-occupied HOMO in the neutral system and
+    ! a core hole calculation.
+    if ((mod(inumelec, 2) .eq. 0) .and. (is_core_hole)) then
+      ltsingle = .false.
+    ! Next case: core hole calculation on a single-occupancy HOMO system.
+    else if ((mod(inumelec, 2) .eq. 1) .and. (is_core_hole)) then
+      ltsingle = .true.
+    ! Next case: non-corehole, fully-occupied HOMO.
+    else if ((mod(inumelec, 2) .eq. 0) .and. (is_core_hole .eqv. .false.)) then
+      ltsingle = .false.
+    ! Final case: non-corehole, single-occupancy HOMO.
+    else
+      ltsingle = .true.
+    end if
+    
+    ! So now we need to iterate over all the kpts and spins to find the lowest
+    ! eigenvalue with index ltstate to use as our zero point.
+    lteigen = 1e12 ! just some huge number
+    do nk=1,nkpts
+      do ns=1,nspins
+        if (eigen(ltstate, nk, ns) < lteigen) then
+          lteigen = eigen(ltstate, nk, ns)
+        end if
+      end do
+    end do
   
   end subroutine
   
@@ -308,22 +374,24 @@ module core_level_spectra
     integer :: nk, ns, nb, iw, icmpt
     integer, intent(in) :: orb
     
-    ! Subtract the fermi level from all eigenvalues - we calculate the spectra
-    ! relative to zero eV - false edge.
-    if (nspins .eq. 1) then
-      eigen = eigen - efermi(1)
-      efermi(1) = 0.0d0
-    else
-      if (efermi(1) .gt. efermi(2)) then
-        eigen = eigen - efermi(1)
-        efermi(2) = efermi(2) - efermi(1)
-        efermi(1) = 0.0d0
-      else
-        eigen = eigen - efermi(2)
-        efermi(1) = efermi(1) - efermi(2)
-        efermi(2) = 0.0d0
-      end if
-    end if
+    ! We want to subtract not the fermi level but the lowest allowed unoccupied
+    ! state (determined in init). By doing this, we can add the Pickard/Gao
+    ! transition energy and get a spectrum at the 'proper' DFT edge.
+    eigen = eigen - lteigen
+    !if (nspins .eq. 1) then
+    !  eigen = eigen - efermi(1)
+    !  efermi(1) = 0.0d0
+    !else
+    !  if (efermi(1) .gt. efermi(2)) then
+    !    eigen = eigen - efermi(1)
+    !    efermi(2) = efermi(2) - efermi(1)
+    !    efermi(1) = 0.0d0
+    !  else
+    !    eigen = eigen - efermi(2)
+    !    efermi(1) = efermi(1) - efermi(2)
+    !    efermi(2) = 0.0d0
+    !  end if
+    !end if
     
     ! By default the smearing value is just a constant width.
     smear_value = lorentzian_width
@@ -332,13 +400,12 @@ module core_level_spectra
     
     allocate(lastspec(spectrum_points,6))
     
+    lastspec = 0.0d0
+    
     do ns=1,nspins
       do nk=1,nkpts
-        do nb=1,mbands
-        
-          if (DEBUG .eq. 1) then
-            write(*,*) "Spin, Kpt, Band: ", ns, nk, nb
-          end if
+        ! Note: only need to go over bands from ltstate and up.
+        do nb=ltstate,mbands
           
           matrix_cmpt(1) = realpart(optmat(orb,nb,1,nk,ns) * dconjg(optmat(orb,nb,1,nk,ns)))
           matrix_cmpt(2) = realpart(optmat(orb,nb,2,nk,ns) * dconjg(optmat(orb,nb,2,nk,ns)))
@@ -347,14 +414,18 @@ module core_level_spectra
           matrix_cmpt(5) = 2.0d0 * realpart(optmat(orb,nb,1,nk,ns) * dconjg(optmat(orb,nb,3,nk,ns)))
           matrix_cmpt(6) = 2.0d0 * realpart(optmat(orb,nb,2,nk,ns) * dconjg(optmat(orb,nb,3,nk,ns)))
           
-          if (DEBUG .eq. 1) then
-            write(*,*) matrix_cmpt
-          end if
           e_nks = eigen(nb,nk,ns) * hart2eV
-          if (eigen(nb,nk,ns) .ge. efermi(ns)) then
-            f_nks = 1.0d0         
-          else
-            f_nks = 0.0d0
+          ! Because of the way we've set the eigenvalues, don't need to set
+          ! an occupancy here (code commented out, left for comparison).
+          !if (eigen(nb,nk,ns) .ge. efermi(ns)) then
+          !  f_nks = 1.0d0         
+          !else
+          !  f_nks = 0.0d0
+          !end if
+          f_nks = 1.0d0
+          if ((nb .eq. ltstate) .and. (ltsingle)) then
+            f_nks = 0.5d0 ! This needs to be modified to take into account
+                          ! the possibility of a fractional core hole!
           end if
       
           do iw=1,spectrum_points
