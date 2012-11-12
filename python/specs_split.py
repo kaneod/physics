@@ -34,7 +34,7 @@ class Application(Frame):
   
   def loadxml(self):
     
-    xmlfile = tkFileDialog.askopenfilename(title="Choose a SPECS .xml file.", initialdir="~/Desktop")
+    xmlfile = tkFileDialog.askopenfilename(title="Choose a SPECS .xml file.", initialdir=os.getcwd())
     
     if xmlfile != None:
       xmlcontents = specs.SPECS(xmlfile)
@@ -42,7 +42,8 @@ class Application(Frame):
       # Make a folder: call it "xmlfile"-unpacked
       base_path = os.path.split(xmlfile)[0]
       cwd = os.getcwd()
-      unpack_path = os.path.join(base_path, xmlfile+"-unpacked")
+      # Remove whitespace either side of the name. It's important. :o)
+      unpack_path = os.path.join(base_path, xmlfile+"-unpacked").strip()
       os.mkdir(unpack_path)
       os.chdir(unpack_path)
       
@@ -56,9 +57,9 @@ class Application(Frame):
         name_counter = 0
         while not have_name:
           if name_counter == 0:
-            tmpname = g.name
+            tmpname = g.name.strip()
           else:
-            tmpname = g.name + "-" + str(name_counter)
+            tmpname = (g.name + "-" + str(name_counter)).strip()
           if not os.path.exists(tmpname):
             os.mkdir(tmpname)
             os.chdir(tmpname)
