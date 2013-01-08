@@ -1,11 +1,15 @@
 ################################################################################
 #
-# Bits of Python For Physics
+# Physics
 #
 ################################################################################
 #
-# The title is a bit of a misnomer, because these code fragments/libraries
-# aren't actually all in python, nor are they actually about physics. 
+# This used to be called "Bits of Python for Physics", but that was starting
+# to annoy me when I was creating clones on my computers. So here we are.
+
+# The old title was a misnomer, because these code fragments/libraries
+# aren't actually all in python (to be honest, they aren't all about physics
+# either!).
 #
 # Mostly, the files here are for doing things like converting the outputs of
 # various electronic structure codes into inputs of other electronic structure
