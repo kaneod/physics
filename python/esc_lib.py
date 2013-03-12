@@ -41,7 +41,7 @@ from scipy.integrate import quad
 from scipy.special import sph_harm
 from scipy.optimize import leastsq, curve_fit, fmin_slsqp
 #from scipy.optimize import minimize
-from libabitools import io, wave, spectra
+#from libabitools import io, wave, spectra
 from scipy.io import netcdf
 import os
 
@@ -2260,7 +2260,7 @@ class Atoms:
         self.filehook.close()
         self.filehook = 0
     
-    def __init__(self, filename, filetype="XSF"):
+    def __init__(self, filename, filetype="XSF", options=None):
         """ atoms = Atoms(filename, filetype="XSF")
         
         Creates an Atoms object from some input file. You have to
@@ -2300,6 +2300,8 @@ class Atoms:
             self.loadFromETSF(filename)
         elif filetype == "castep":
             self.loadFromCastep(filename)
+        elif filetype == "VASP":
+            self.loadFromVASP(filename, options)
         else:
           print "(esc_lib.Atoms.__init__) ERROR: File type %s not handled at present." % filetype
           return None
@@ -2684,6 +2686,112 @@ class Atoms:
             
         self.positions = [[array(x) for x in pos.tolist()]]
         
+    def loadFromVASP(self, vasp_file, ions=None):
+      """ atoms = Atoms.loadFromVASP(vasp_file, ions=[])
+      
+      Internal, inits an Atoms object from a VASP POSCAR or CONTCAR file. Very rudimentary
+      for the present but good enough for converting from CONTCAR to other formats.
+      
+      Neither the POSCAR nor CONTCAR files actually specify what species are listed, 
+      so you can give a list (strings like 'C' or numbers like 6) of the species to match
+      those in the file, using the ions input.
+      
+      """
+      
+      # Destroy our current data
+      self.clean()
+      
+      # We must be a crystal, and NO animations here.
+      self.is_crystal = True
+      self.nsteps = 1
+      
+      f = open(vasp_file)
+      if not f:
+        raise ESCError("File %s could not be opened - exiting.")
+          
+      lines = f.readlines()
+      f.close()
+      
+      # The POSCAR/CONTCAR format is a line-position based format. First line is a 
+      # comment, second line is the scale of the unit cell.
+      
+      scale = float(lines[1].split()[0])
+      
+      # Next three lines are the lattice vectors
+      a = ang2bohr(array([float(x) for x in lines[2].split()[0:3]])) * scale
+      b = ang2bohr(array([float(x) for x in lines[3].split()[0:3]])) * scale
+      c = ang2bohr(array([float(x) for x in lines[4].split()[0:3]])) * scale
+      
+      # Now, depending on the version of VASP we start to get in a spot of bother,
+      # so we need to look ahead. If there are two lines of numbers, the first line
+      # gives the species, the second gives the species *counts*. If there is only
+      # one line of numbers, it is just the species counts. Then the Selective Dynamics
+      # line is OPTIONAL and then finally we must have either Direct or Cartesian. So
+      # look ahead until we get either direct or cartesian (only the first letter matters).
+      
+      for i,l in enumerate(lines[5:]):
+        if l[0] in ['d', 'D', 'c', 'C']:
+          if DEBUG:
+            print "Found Direct/Cart at line %d." % i
+          # First mark whether it is Direct or Cartesian for later.
+          if l[0] in ['d', 'D']:
+            ptype = 'Direct'
+          else:
+            ptype = 'Cartesian'
+          if i+5 == 6:
+            # No Selective Dynamics, no species.
+            # So, lines[5] is the set of ion counts.
+            cline = 5
+            iline = None
+            pline = 7
+          elif i+5 == 7:
+            # Either Selective Dynamics or species are included (not both).
+            pline = 8
+            if lines[6][0] in ['S', 's']:
+              # Selective Dynamics, so species NOT included.
+              cline = 5
+              iline = None
+            else:
+              # Species at line 5, counts at line 6
+              iline = 5
+              cline = 6
+          elif i+5 == 8:
+            pline = 9
+            # Both selective Dynamics and species.
+            iline = 5
+            cline = 6
+          break
+      
+      # The ions input overrides the iline if it is present. 
+      ion_counts = [int(x) for x in lines[cline].split()]
+      if ions is not None:
+        species = []
+        for i, ic in enumerate(ion_counts):
+          species += ic * [getElementZ(ions[i])]
+      elif iline is not None:
+        ion_species = [int(x) for x in lines[iline].split()]
+        for i, ic in enumerate(ion_counts):
+          species += ic * [getElementZ(ion_species[i])]      
+      else:
+        species = []
+        # If there are no ions specified, just start at H and work up the integers.
+        for i, ic in enumerate(ion_counts):
+          species += ic * [i+1]
+      
+      positions = []
+      for i in range(sum(ion_counts)):
+        pos = array([float(x) for x in lines[pline+i].split()[0:3]])
+        if ptype == 'Direct':
+          pos = pos[0] * a + pos[1] * b + pos[2] * c
+        else:
+          pos = ang2bohr(pos)
+        positions.append(pos)
+      
+      self.species.append(species)
+      self.positions.append(array(positions))
+      self.lattice.append([a, b, c])      
+          
+                   
     def loadFromXSF(self, xsf_file):
         """ atoms = Atoms.loadFromXSF(xsf_file)
         
@@ -2954,8 +3062,37 @@ class Atoms:
         
         
         return cur_pos, pos_hist
-        
-    def rotateAtoms(self, rotation_file, fileopt=0, timestep=0):
+    
+    def generateConstraints(self, constrained_atoms):
+      """ text_constraints = Atoms.generateConstraints(constrained_atoms)
+      
+      Generates the %BLOCK IONIC_CONSTRAINTS text to fix the listed atoms and 
+      returns the text. That's all. CASTEP-style constraints. Note that the
+      timestep is irrelevant here so we always take from timestep 0.
+      
+      The list of constrained atoms is 1-based, not 0-based, to match with
+      the style used in CASTEP.
+      
+      """
+      
+      text_constraints = ["%block ionic_constraints"]
+      count = 0
+      
+      for i in constrained_atoms:
+        spec = elements[self.species[0][i-1]] # i-1, not i, because 1-based.
+        # To find the ion number, we count from the first occurrence of the same
+        # species.
+        ion = i - self.species[0].index(self.species[0][i-1])
+        text_constraints.append("  %d  %s  %d 1.0 0.0 0.0" % (count+1, spec, ion))
+        text_constraints.append("  %d  %s  %d 0.0 1.0 0.0" % (count+2, spec, ion))
+        text_constraints.append("  %d  %s  %d 0.0 0.0 1.0" % (count+3, spec, ion))
+        count += 3
+      
+      text_constraints.append("%endblock ionic_constraints")
+      
+      return "\n".join(text_constraints)
+      
+    def rotateAtoms(rotation_file, fileopt=0, timestep=0):
       """ success = Atoms.rotateAtoms(rotation_file, fileopt=0)
       
       Apply the rotations specified in rotation_file to an Atoms object positions.
