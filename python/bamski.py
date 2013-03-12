@@ -318,18 +318,18 @@ class Application(Frame):
             print "Couldn't subtract a linear pre-edge from the pey spectrum for this region."
           
           # Individually normalize the components
-          try:
-            subdata[:,15] = subdata[:,15] / subdata[-1,15]
-          except FloatingPointError:
-            print "The AEY channel cannot be 1-normalized for this file."
-          try:
-            subdata[:,16] = subdata[:,16] / subdata[-1,16]
-          except FloatingPointError:
-            print "The TEY channel cannot be 1-normalized for this file."
-          try:
-            subdata[:,17] = subdata[:,17] / subdata[-1,17]
-          except FloatingPointError:
-            print "The PEY channel cannot be 1-normalized for this file."
+          #try:
+          #  subdata[:,15] = subdata[:,15] / subdata[-1,15]
+          #except FloatingPointError:
+          #  print "The AEY channel cannot be 1-normalized for this file."
+          #try:
+          #  subdata[:,16] = subdata[:,16] / subdata[-1,16]
+          #except FloatingPointError:
+          #  print "The TEY channel cannot be 1-normalized for this file."
+          #try:
+          #  subdata[:,17] = subdata[:,17] / subdata[-1,17]
+          #except FloatingPointError:
+          #  print "The PEY channel cannot be 1-normalized for this file."
           
           have_name = False
           name_counter = 0
@@ -362,6 +362,10 @@ class Application(Frame):
     
     # Pull out the channels we need. MUST have extended channels present for NEXAFS
     # work so fail if we don't find them. 
+    
+    if DEBUG:
+      print "Region: ", region.name, region.extended_channels.shape
+      
     if region.extended_channels is not None:
       energy = region.excitation_axis
       if len(self.omit_aey_channels) > 0:
@@ -412,7 +416,7 @@ class Application(Frame):
     
     # Now deal with the normalization file if necessary. Same deal.
     if normdata is not None:
-      if normdata.shape[1] == 25:
+      if normdata.shape[1] == 26:
         nenergy = normdata[:,0]
         ntey = normdata[:,12]
         if len(self.omit_aey_channels) > 0:
@@ -467,6 +471,13 @@ class Application(Frame):
           print "process_region: Divide by zero in i0 normalization - cannot double normalize using this data."
         # Need a warning dialog...
       
+      # It's critical that the energy scales are aligned for this kind of normalization
+      # otherwise we get serious problems: assume the actual data scale is correct
+      # and shift the norm data.
+      nmin = argmin(ni0)
+      dmin = argmin(i0)
+      ecorrect = energy[dmin] - nenergy[nmin]
+      nenergy += ecorrect
       # Now normalize by interpolating the norm data. We use a fill value of 
       # positive infinity to ensure that data that is out-of-range of the 
       # normalization energy spectrum is zeroed rather than falsely normalized.
