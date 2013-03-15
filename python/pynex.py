@@ -53,7 +53,7 @@ parser = argparse.ArgumentParser(description="Calculate individual NEXAFS spectr
 
 parser.add_argument('seed', help="CASTEP base seedname")
 parser.add_argument('atlist', help="List of atomic suffixes.")
-parser.add_argument('atom', help="Atom number of core hole site.")
+parser.add_argument('atom', help="Castep orbital number. This is hard to guess so just run pynex once and then use the number equal\nto the number of core projectors as usually the special core hole atom is last in the species.")
 parser.add_argument('-t', '--transition_file', default=None, help="Transition energies file.")
 
 args = parser.parse_args()
