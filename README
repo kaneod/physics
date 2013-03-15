@@ -1,11 +1,15 @@
 ################################################################################
 #
-# Bits of Python For Physics
+# Physics
 #
 ################################################################################
 #
-# The title is a bit of a misnomer, because these code fragments/libraries
-# aren't actually all in python, nor are they actually about physics. 
+# This used to be called "Bits of Python for Physics", but that was starting
+# to annoy me when I was creating clones on my computers. So here we are.
+
+# The old title was a misnomer, because these code fragments/libraries
+# aren't actually all in python (to be honest, they aren't all about physics
+# either!).
 #
 # Mostly, the files here are for doing things like converting the outputs of
 # various electronic structure codes into inputs of other electronic structure
@@ -44,5 +48,10 @@
 # at least until the end of 2013. After that, try searching for me
 # on the web and don't get confused with the Kane O'Donnell from New Zealand 
 # who ALSO happens to study physics. I'm the one from Australia!
+# 
+# PS: If YOU are the Kane O'Donnell from NZ, congratulations on your
+# scholarship to Cambridge! It's a great place, you'll love it.
+# 
+# Cheers from across the Tasman! :o)
 #
 ################################################################################

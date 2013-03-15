@@ -4,7 +4,7 @@
 #
 # pynex.py
 #
-# Usage: pynex.py [--trans_file=file --output=[single|combined]] SEED list atom
+# Usage: pynex.py [--trans_file=file] SEED list atom
 #
 # Constructs names "SEED_X" where X is a number from the file "list", then 
 # combines all the NEXAFS spectra for atom "atom" together and writes to a file.
@@ -81,8 +81,8 @@ for i, a in enumerate(atlist):
   seed = prefix + "_" + str(a)
   lpe.init(seed)
   # Set spectral preferences here!
-  lpe.lorentzian_width = 0.15
-  lpe.gaussian_broadening = 0.3
+  lpe.lorentzian_width = 0.05
+  lpe.gaussian_broadening = 0.05
   lpe.linear_broadening = 0.1
   lpe.generate_single_spectrum(species)
   if transitions is not None:

@@ -52,6 +52,7 @@ from numpy import array, linspace, zeros, ceil, amax, amin, argmax, argmin, abs
 from numpy import polyfit, polyval, seterr, trunc, mean
 from numpy.linalg import norm
 from scipy.interpolate import interp1d
+from scipy.fftpack import fft, ifft
 
 DEBUG = 1
 OPTION = 2
@@ -390,9 +391,10 @@ def preedge_calculate(x,y):
     y = y[::-1]
   else:
     is_reversed = False
-    
-  # Locate the biggest peak.
-  maxidx = abs(y - amax(y)).argmin()
+  
+  # Use an external algorithm to find the index of the actual peak.
+  # (Note: finds the BIGGEST peak)
+  maxidx = peakfind(x,y)
   
   # Find the gradient of every possible linear fit between the lowest binding energy
   # and the biggest peak.
@@ -464,7 +466,7 @@ def shirley_calculate(x,y, tol=1e-5, maxit=10):
     is_reversed = False
     
   # Locate the biggest peak.
-  maxidx = abs(y - amax(y)).argmin()
+  maxidx = peakfind(x,y)
   
   # It's possible that maxidx will be 0 or -1. If that is the case,
   # we can't use this algorithm, we return a zero background.
@@ -519,5 +521,39 @@ def shirley_calculate(x,y, tol=1e-5, maxit=10):
   else:    
     return yr + B    
     
+def peakfind(x,y):
+  """ maxidx = peakfind(x,y)
+  
+  Sneaky code to determine a peak location. First we differentiate y and
+  FFT-smooth it. This gives a wiggle-spectrum. Take the minima and maxima
+  of this spectrum and find the maximum between these two points in the 
+  ORIGINAL spectrum. It's close enough.
+  
+  """
+  
+  grad = zeros((len(y)-1))
+  for i in range(len(y)-1):
+    grad[i] = y[i+1] - y[i]
     
+  fgrad = fft(grad)
+  
+  # Filter this - arbitrarily set the window to be the first and last 10% of
+  # the FFT spectrum.
+  lowidx = int(0.1 * len(fgrad))
+  highidx = int(0.9 * len(fgrad))
+  for i in range(len(fgrad)):
+    if i > lowidx and i < highidx:
+      fgrad[i] = 0.0
+  
+  filtered_grad = ifft(fgrad)
+ 
+  highidx = filtered_grad.argmin()
+  lowidx = filtered_grad.argmax()
+  
+  # Now: highidx and lowidx may not be in the correct order (ie, they are
+  # not very well named! If lowidx > highidx we reverse them.
+  if lowidx < highidx:
+    return y[lowidx:highidx].argmax() + lowidx
+  else:
+    return y[highidx:lowidx].argmax() + highidx
         
