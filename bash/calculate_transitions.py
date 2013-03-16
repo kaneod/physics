@@ -17,10 +17,13 @@ dEaea = Eaestar - Eae
 dEpsa = Epsstar - Eps
 dEca = dEaea - dEpsa
 
+print "dEca = %f" % (dEca)
+
 transitions = []
 
 for Etstar in total_energies:
   dEv = Etstar - Et
+  print "dEv = %f" % dEv
   transitions.append(dEv + dEca)
 
 transitions=array(transitions)
