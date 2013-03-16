@@ -86,9 +86,10 @@ for i, a in enumerate(atlist):
   lpe.linear_broadening = 0.1
   lpe.generate_single_spectrum(species)
   if transitions is not None:
-    # Transition energies tend to be negative (sign convention) so have to
-    # subtract here.
-    spectra.append([lpe.w.copy() - transitions[i], lpe.lastspec.copy()])
+    # If you use the convention that an energy difference is excited - neutral
+    # in Gao's transition energy calculation, the transition energy is POSITIVE,
+    # so add it here. If the transition energy is negative, subtract here instead.
+    spectra.append([lpe.w.copy() + transitions[i], lpe.lastspec.copy()])
   else:
     spectra.append([lpe.w.copy(), lpe.lastspec.copy()])
 

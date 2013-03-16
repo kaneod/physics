@@ -44,7 +44,7 @@ fi
 
 if [ -e atom_energies.txt ]
 then
-  python calculate_transitions.py total_energies.txt neutral.txt atom_energies.txt
+  python `dirname $0`/calculate_transitions.py total_energies.txt neutral.txt atom_energies.txt
 else
   echo "atom_energies.txt does not exist - can't run the python script. See transitions.sh file for explanation."
   exit
