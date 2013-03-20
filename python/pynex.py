@@ -44,7 +44,7 @@
 
 import argparse
 import libpytep as lp
-from numpy import zeros, savetxt, amin, amax, arange, array
+from numpy import zeros, savetxt, amin, amax, arange, array, linspace
 from scipy.interpolate import interp1d
 
 lpe = lp.core_level_spectra
@@ -144,14 +144,18 @@ else:
       maxx = amax(xy[0])
   # Generate a spectrum between minx and maxx with the given step. We want to
   # include the endpoint here so we have to add a step.
-  x = arange(minx, maxx+step, step)
-  print "Generating combined output on xaxis starting at ", minx, ", stopping at ", maxx, " and with step size ", step, "."
+  x = arange(minx, maxx+float(step)/2, float(step)/2)
+  #x = linspace(minx, maxx, 2000)
+
+  print "Generating combined output on xaxis starting at ", minx, ", stopping at ", maxx, " and with step size ", step/2, "."
   print "This gives ", len(x), " points in the spectrum."
-  # Now generate interpolators and interpolate 
+  ## Now generate interpolators and interpolate 
   tmp = zeros((len(x), 7))
   for xy in spectra:
+    xt = xy[0]
+    yt = xy[1]
     for i in range(6):
-      ixy = interp1d(xy[0], xy[1][:,i], bounds_error=False, fill_value=0.0)
+      ixy = interp1d(xt, yt[:,i], bounds_error=False, fill_value=0.0)
       tmp[:,i+1] += array([ixy(E) for E in x])
   tmp[:,0] = x
   savetxt(prefix + "_combined.nexafs", tmp)
