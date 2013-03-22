@@ -11,7 +11,7 @@ Eaestar = atom_energies[1]
 Eps = atom_energies[2]
 Epsstar = atom_energies[3]
 
-Et = neutral_energy
+Et = neutral_energy[0]
 
 dEaea = Eaestar - Eae
 dEpsa = Epsstar - Eps
