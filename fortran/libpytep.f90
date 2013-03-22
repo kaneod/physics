@@ -39,6 +39,11 @@
 !
 ! 3. This file should be compiled with f2py to generate the python interface.
 !
+! 4. This code RELIES ON hole_charge and nelectrons (both length 2 arrays) being
+!    set EXTERNALLY PRIOR TO INIT being called. For the reasons, see the code
+!    around the end of init where the lowest transition is found, 22May2013 update.
+!    If you fail to do this, you will get a rubbish spectrum.
+!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 module constants
@@ -121,9 +126,11 @@ module core_level_spectra
   real(kind=dp), dimension(:,:), allocatable :: lastspec
   real(kind=dp) :: efermi(2), nelectrons(2), lvec(3,3), w_step
   real(kind=dp) :: matrix_cmpt(6), e_nks, f_nks, smear_factor
-  integer :: ltstate ! index of the lowest state we can transition to.
-  logical :: ltsingle ! account for singly-occupied HOMO states.
-  real(kind=dp) :: lteigen ! lowest allowed transition eigenvalue.
+  integer :: ltstate(2) ! index of the lowest state we can transition to in each spin.
+  integer :: ltminstate ! minimum of the two ltstates.
+  integer :: ltsingle ! strictly below ltsingle, eigenvalues are only half-occupied.
+                      ! Set to zero if no singly-occupied eigenvalues.
+  real(kind=dp) :: lteigen ! lowest allowed transition eigenvalue (of any spin)
   
   ! Default settings
   real(kind=dp) :: lorentzian_width = 0.3d0 ! eV
@@ -134,7 +141,8 @@ module core_level_spectra
   real(kind=dp) :: gaussian_broadening = 0.3d0 ! eV
   real(kind=dp) :: smear_value = 0.0d0
   logical :: is_core_hole = .true.
-  real(kind=dp) :: hole_charge = 1.0d0 ! denotes a full core hole.
+  real(kind=dp) :: hole_charge(2) = (/ 1.0d0, 0.0d0 /) ! denotes a full core hole in the
+                                                    ! first spin.
     
   contains
   
@@ -167,7 +175,10 @@ module core_level_spectra
     gaussian_broadening = 0.3d0 ! eV
     smear_value = 0.0d0
     is_core_hole = .true.
-    hole_charge = 1.0d0
+    ! Removed these from deallocate because we need to be able to set them
+    ! prior to initialization.
+    !hole_charge(1) = 0.0d0
+    !hole_charge(2) = 0.0d0
     
   end subroutine
   
@@ -181,9 +192,9 @@ module core_level_spectra
     !
     !---------------------------------------------------------------------------
 
-    integer :: nk, orb, ns, nb, iw, icmpt, inumelec
+    integer :: nk, orb, ns, nb, iw, icmpt, inumelec(2)
     character(len=80) :: newseed
-    real(kind=dp) :: numelec
+    real(kind=dp) :: numelec, tmpf
     
     inquire(file=adjustl(trim(newseed))//'.eels_mat', exist=file_exists)
     
@@ -262,23 +273,29 @@ module core_level_spectra
       return
     end if  
   
+    ! 22 MAY 2013 UPDATE
+    ! Note that below I have disabled nelectron reading because CASTEP doesn't correctly
+    ! set this to the end-of-calculation population. We rely on nelectron(1) and (2) being
+    ! set externally PRIOR TO INIT, as noted in the transition section below.
     if (DEBUG .eq. 1) then
       print *, "Made it past integer reads"
     end if
     if (nspins .eq. 1) then
-      read(200,'(20x,g10.4)') nelectrons(1)
+      !read(200,'(20x,g10.4)') nelectrons(1)
+      read(200,'(20x,g10.4)') tmpf
       read(200,'(22x,I6)') nbands(1)
       read(200,'(31x,F12.6)') efermi(1)
       write(*,*) "Inside the .bands file we get:"
-      write(*,*) "Number of electrons = ", nelectrons(1)
+      write(*,*) "Number of electrons (possibly wrong!) = ", tmpf
       write(*,*) "Number of bands = ", nbands(1)
       write(*,*) "Fermi level = ", efermi(1), " Ha"
     else
-      read(200,'(20x,2g10.4)') nelectrons(1:2)
+      !read(200,'(20x,2g10.4)') nelectrons(1:2)
+      read(200,'(20x,2g10.4)') tmpf, tmpf
       read(200,'(22x,2I6)') nbands(1:2)
       read(200,'(33x,2F12.6)') efermi(1:2)
       write(*,*) "Inside the .bands file we get:"
-      write(*,*) "Number of electrons = ", nelectrons(1:2)
+      write(*,*) "Number of electrons (wrong!) = ", tmpf
       write(*,*) "Number of bands = ", nbands(1:2)
       write(*,*) "Fermi level = ", efermi(1:2), " Ha"
     end if
@@ -325,44 +342,96 @@ module core_level_spectra
     ! Four possibilities: can be corehole or non-corehole calculation in
     ! conjunction with either an odd or even number of electrons. Here "odd"
     ! includes any fractional values - can use a partial core hole.
+    !
+    ! 21May2013 UPDATE
+    ! Spin polarization is important here - the lowest transition state may be
+    ! different for each spin channel. So, we need to specify the hole charge for each
+    ! spin in order to figure out the lowest state.
+    ! This also changes how we deal with ltstate quite a lot - it is now an integer
+    ! which signifies the transition between half-occupied and wholly unoccupied states.
+    !
+    ! 22May2013 UPDATE
+    ! An even bigger problem is that CASTEP falsely reports the electron population in the
+    ! bands file. It gives the initial population accounting for the initial spin,
+    ! whereas the final population is different and reported in the .castep file. So,
+    ! we rely here that nelectrons(1) and (2) are set externally BEFORE init is called
+    ! having commented the nelectrons sections of the code out above.
+    
     
     if (is_core_hole .eqv. .false.) then
-      hole_charge = 0.0d0
+      hole_charge(1) = 0.0d0
+      hole_charge(2) = 0.0d0
     end if
     
     if (nspins .eq. 1) then
-      numelec = nelectrons(1)
+      inumelec(1) = anint(nelectrons(1) - hole_charge(1)) ! anint ROUNDS to nearest.
+      ltstate(1) = inumelec(1) / 2 + 1
+      write(*,*) "Lowest unoccupied state is ", ltstate(1)
     else
-      numelec = nelectrons(1) + nelectrons(2)
+      inumelec(1) = anint(nelectrons(1) - hole_charge(1)) ! anint ROUNDS to nearest.
+      inumelec(2) = anint(nelectrons(2) - hole_charge(2))
+      ltstate(1) = inumelec(1) + 1
+      ltstate(2) = inumelec(2) + 1
+      write(*,*) "Lowest unoccupied states are ", ltstate(1), ltstate(2)
     end if
     
     ! True number of valence electrons in neutral system - must be an integer.
-    inumelec = int(numelec - hole_charge)
+    !inumelec = int(numelec - hole_charge)
     ! The lowest transition state is then integer/2 + 1
-    ltstate = inumelec / 2 + 1
+    !ltstate = inumelec / 2 + 1
+    !write(*,*) ltstate
+    
+    ! New case system. Now based on whether the ltstate(1) and (2)s are equal or not.
+    if (nspins .eq. 1) then
+      if (mod(inumelec(1), 2) .eq. 0) then
+        ! Number of electrons is even: first unexcited state is wholly unoccupied.
+        ltsingle = 0
+      else
+        ltsingle = ltstate(1) + 1
+      end if
+      ltminstate = ltstate(1)
+    else
+      if (ltstate(1) .eq. ltstate(2)) then
+        ! First excited state is wholly unoccupied.
+        ltsingle = 0
+        ltminstate = ltstate(1)
+      else if (ltstate(1) .gt. ltstate(2)) then
+        ! Excited states >= ltstate(1) are wholly unoccupied.
+        ltsingle = ltstate(1)
+        ltminstate = ltstate(2)
+      else if (ltstate(2) .gt. ltstate(1)) then
+        ! Excited states >= ltstate(2) are wholly unoccupied.
+        ltsingle = ltstate(2)
+        ltminstate = ltstate(1)
+      end if
+    end if
+    
+    if (DEBUG .eq. 1) then
+      write(*,*) "We have ltsingle = ", ltsingle, " and ltminstate = ", ltminstate
+    end if
     
     ! Most common case first: fully-occupied HOMO in the neutral system and
     ! a core hole calculation.
-    if ((mod(inumelec, 2) .eq. 0) .and. (is_core_hole)) then
-      ltsingle = .false.
-    ! Next case: core hole calculation on a single-occupancy HOMO system.
-    else if ((mod(inumelec, 2) .eq. 1) .and. (is_core_hole)) then
-      ltsingle = .true.
-    ! Next case: non-corehole, fully-occupied HOMO.
-    else if ((mod(inumelec, 2) .eq. 0) .and. (is_core_hole .eqv. .false.)) then
-      ltsingle = .false.
-    ! Final case: non-corehole, single-occupancy HOMO.
-    else
-      ltsingle = .true.
-    end if
+    !if ((mod(inumelec, 2) .eq. 0) .and. (is_core_hole)) then
+    !  ltsingle = .false.
+    !! Next case: core hole calculation on a single-occupancy HOMO system.
+    !else if ((mod(inumelec, 2) .eq. 1) .and. (is_core_hole)) then
+    !  ltsingle = .true.
+    !! Next case: non-corehole, fully-occupied HOMO.
+    !else if ((mod(inumelec, 2) .eq. 0) .and. (is_core_hole .eqv. .false.)) then
+    !!  ltsingle = .false.
+    !! Final case: non-corehole, single-occupancy HOMO.
+    !else
+    !  ltsingle = .true.
+    !end if
     
     ! So now we need to iterate over all the kpts and spins to find the lowest
     ! eigenvalue with index ltstate to use as our zero point.
     lteigen = 1e12 ! just some huge number
     do nk=1,nkpts
       do ns=1,nspins
-        if (eigen(ltstate, nk, ns) < lteigen) then
-          lteigen = eigen(ltstate, nk, ns)
+        if (eigen(ltstate(ns), nk, ns) < lteigen) then
+          lteigen = eigen(ltstate(ns), nk, ns)
         end if
       end do
     end do
@@ -405,7 +474,7 @@ module core_level_spectra
     do ns=1,nspins
       do nk=1,nkpts
         ! Note: only need to go over bands from ltstate and up.
-        do nb=ltstate,mbands
+        do nb=ltminstate,mbands
           
           matrix_cmpt(1) = realpart(optmat(orb,nb,1,nk,ns) * dconjg(optmat(orb,nb,1,nk,ns)))
           matrix_cmpt(2) = realpart(optmat(orb,nb,2,nk,ns) * dconjg(optmat(orb,nb,2,nk,ns)))
@@ -423,8 +492,10 @@ module core_level_spectra
           !  f_nks = 0.0d0
           !end if
           f_nks = 1.0d0
-          if ((nb .eq. ltstate) .and. (ltsingle)) then
-            f_nks = 0.5d0 ! This needs to be modified to take into account
+          ! MODIFICATION: nb < ltsingle => f_nks = 0.5.
+          if (nb .lt. ltsingle) then
+          !if ((nb .eq. ltstate) .and. (ltsingle)) then
+            f_nks = 1.0d0 ! This needs to be modified to take into account
                           ! the possibility of a fractional core hole!
           end if
       
