@@ -93,7 +93,7 @@ prefix = prefs[0]
 # Open the suffixes file.
 #af = open(args.atlist, 'r')
 af = open(prefs[1], 'r')
-atlist = [int(x) for x in " ".join(af.readlines()).split()]
+atlist = [x for x in " ".join(af.readlines()).split()]
 af.close()
 
 # Get the transition energies
