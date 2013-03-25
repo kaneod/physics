@@ -1,5 +1,7 @@
 #!/bin/bash
-
+#
+#
+# USAGE: transitions.sh SEED identifier_file atomic_energies_file
 # Extracts the total energies from each of the core hole calculations and puts them
 # in a single file, does the same for the neutral calculation, then runs the python
 # script that calculates the transition energies (written to transitions.txt). 
@@ -14,13 +16,14 @@
 
 # In addition, must have a ${seed}_neutral.castep file available in the same directory.
 
-# The python script requires that a file called atom_energies.txt be present that
+# The python script requires that a file atomic_energies_file be present that
 # has four energies in this order: the AE energies of the neutral and core hole atom,
 # and the PS energies of the neutral and core hole atom. This is the order they
 # appear in the .castep header.
 
 seed=$1
 atlist=$2
+enlist=$3
 
 if [ -e total_energies.txt ]
 then
@@ -57,9 +60,9 @@ else
   exit
 fi
 
-if [ -e atom_energies.txt ]
+if [ -e $enlist ]
 then
-  python `dirname $0`/calculate_transitions.py total_energies.txt neutral.txt atom_energies.txt
+  python `dirname $0`/calculate_transitions.py total_energies.txt neutral.txt $enlist
 else
   echo "atom_energies.txt does not exist - can't run the python script. See transitions.sh file for explanation."
   exit
