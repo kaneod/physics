@@ -6,6 +6,10 @@ total_energies = loadtxt(sys.argv[1])
 neutral_energy = loadtxt(sys.argv[2])
 atom_energies = loadtxt(sys.argv[3])
 
+# Because total_energies can be a single line, have to explicitly check here.
+if total_energies.shape is ():
+  total_energies = array([total_energies])
+
 Eae = atom_energies[0]
 Eaestar = atom_energies[1]
 Eps = atom_energies[2]
