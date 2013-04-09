@@ -432,10 +432,13 @@ module core_level_spectra
       do ns=1,nspins
         if (eigen(ltstate(ns), nk, ns) < lteigen) then
           lteigen = eigen(ltstate(ns), nk, ns)
+          if (DEBUG .eq. 1) then
+            write(*,*) "Lowest eigenvalue lteigen: ", lteigen, "state ", ltstate(ns)
+          end if
         end if
       end do
     end do
-  
+
   end subroutine
   
   subroutine generate_single_spectrum(orb)
@@ -499,6 +502,10 @@ module core_level_spectra
                           ! the possibility of a fractional core hole!
           end if
       
+          if (DEBUG .eq. 1) then
+            write(*,*) "Band: ", nb, "Eigen:", e_nks
+          end if
+          
           do iw=1,spectrum_points
             smear_value = lorentzian_width + linear_broadening * w(iw)
           
