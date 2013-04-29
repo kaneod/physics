@@ -123,6 +123,7 @@ nf.close()
 #species = int(args.atom)
 species = int(prefs[6])
 spectra = []
+rawspectra = []
 
 for i, a in enumerate(atlist):
   print "Processing seed: ", prefix+ "_" + str(a)
@@ -166,6 +167,7 @@ for i, a in enumerate(atlist):
   # in Gao's transition energy calculation, the transition energy is POSITIVE,
   # so add it here. If the transition energy is negative, subtract here instead.
   spectra.append([lpe.w.copy() + transitions[i], lpe.lastspec.copy()])
+  rawspectra.append([lpe.w.copy() + transitions[i], lpe.rawspec.copy()])
 
 # Output the single atomic spectra
 for i, xy in enumerate(spectra):
@@ -175,6 +177,15 @@ for i, xy in enumerate(spectra):
   tmp[:,0] = x
   tmp[:,1:] = y
   savetxt(prefix+ "_" + str(atlist[i]) + ".nexafs", tmp)
+
+# Output the unbroadened atomic spectra.  
+for i, xy in enumerate(rawspectra):
+  x = xy[0]
+  y = xy[1]
+  tmp = zeros((y.shape[0], y.shape[1]+1))
+  tmp[:,0] = x
+  tmp[:,1:] = y
+  savetxt(prefix+ "_" + str(atlist[i]) + ".raw.nexafs", tmp)
 
 # Combine the individual spectra. This is non-trivial in general because the
 # different transition energies make the x-axis different. So we divide into 
@@ -213,7 +224,7 @@ x = arange(minx, maxx+float(step)/2, float(step)/2)
 
 print "Generating combined output on xaxis starting at ", minx, ", stopping at ", maxx, " and with step size ", step/2, "."
 print "This gives ", len(x), " points in the spectrum."
-## Now generate interpolators and interpolate 
+# Now generate interpolators and interpolate 
 tmp = zeros((len(x), 7))
 for xy in spectra:
   xt = xy[0]
@@ -224,3 +235,13 @@ for xy in spectra:
 tmp[:,0] = x
 savetxt(prefix + "_combined.nexafs", tmp)
     
+# Do same for raw spectra
+tmp = zeros((len(x), 7))
+for xy in rawspectra:
+  xt = xy[0]
+  yt = xy[1]
+  for i in range(6):
+    ixy = interp1d(xt, yt[:,i], bounds_error=False, fill_value=0.0)
+    tmp[:,i+1] += array([ixy(E) for E in x])
+tmp[:,0] = x
+savetxt(prefix + "_combined.raw.nexafs", tmp)
