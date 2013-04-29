@@ -104,7 +104,106 @@ module utilities
     
     return
   end subroutine
+  
+  subroutine lorentzian_convolute(xdata, ydata, num_points, lwidth)
+    !---------------------------------------------------------------------------
+    !
+    ! lorentzian_convolute: a conventional convolution where the lorentzian function
+    ! of width gwidth is the second factor in the integral.
+    !
+    !---------------------------------------------------------------------------
+    
+    integer, intent(in) :: num_points
+    real(kind=dp), intent(inout) :: xdata(num_points), ydata(num_points)
+    real(kind=dp) :: tmp(num_points), dx
+    real(kind=dp), intent(in) :: lwidth
+    integer :: i, j
+    
+    ! Assume the step is even (!!)
+    dx = xdata(2) - xdata(1)
+    
+    tmp = 0.0d0
+    
+    do i=1,num_points
+      do j=1,num_points
+        tmp(i) = tmp(i) + dx * ydata(j) * invpi * (lwidth / ((xdata(i) - xdata(j))**2 + &
+        & lwidth**2))
+      end do
+    end do
+    
+    ydata = tmp
+    
+    return
+  end subroutine
+  
+  subroutine lorentzian_linear_convolute(xdata, ydata, num_points, lwidth, llin)
+    !---------------------------------------------------------------------------
+    !
+    ! lorentzian_linear_convolute: a conventional convolution where the lorentzian function
+    ! of width gwidth is the second factor in the integral. The linear broadening is 
+    ! applied as lwidth + llin * | x(j) |, where x(j) is the x value of the spectrum
+    ! being convoluted.  
+    !
+    !---------------------------------------------------------------------------
+    
+    integer, intent(in) :: num_points
+    real(kind=dp), intent(inout) :: xdata(num_points), ydata(num_points)
+    real(kind=dp) :: tmp(num_points), dx
+    real(kind=dp), intent(in) :: lwidth, llin
+    integer :: i, j
+    
+    ! Assume the step is even (!!)
+    dx = xdata(2) - xdata(1)
+    
+    tmp = 0.0d0
+    
+    do i=1,num_points
+      do j=1,num_points
+        tmp(i) = tmp(i) + dx * ydata(j) * invpi * ((lwidth + llin * dabs( &
+        & xdata(j)))/ ((xdata(i) - xdata(j))**2 + (lwidth + llin * dabs( &
+        & xdata(j)))**2))
+      end do
+    end do
+    
+    ydata = tmp
+    
+    return
+  end subroutine
 
+  subroutine integrate(xdata, ydata, integral, num_points)
+    !---------------------------------------------------------------------------
+    !
+    ! integrate: Paired-point Trapezoidal integration of a function. The returned
+    ! ydata array contains the cumulative integral so watch out!
+    !
+    !---------------------------------------------------------------------------
+    integer, intent(in) :: num_points
+    real(kind=dp), intent(out) :: integral
+    real(kind=dp), intent(inout) :: xdata(num_points), ydata(num_points)
+    real(kind=dp) :: a, b, fa, fb, tmpsum, tmp(num_points)
+    integer :: i
+    
+    tmpsum = 0.0d0
+    integral = 0.0d0
+    tmp = 0.0d0
+    a = xdata(1)
+    fa = ydata(1)
+    
+    do i=2,num_points
+      b = xdata(i)
+      fb = ydata(i)
+      tmpsum = tmpsum + (b - a) * (fa + fb) * 0.5d0
+      tmp(i) = tmpsum
+      a = b
+      fa = fb
+    end do
+    
+    ydata = tmp
+    integral = tmpsum
+    
+    return
+  end subroutine
+    
 end module     
  
 module core_level_spectra
@@ -123,7 +222,7 @@ module core_level_spectra
   real(kind=dp), dimension(:), allocatable :: wk, w
   real(kind=dp), dimension(:,:), allocatable :: kpts
   real(kind=dp), dimension(:,:,:), allocatable :: eigen, spectrum
-  real(kind=dp), dimension(:,:), allocatable :: lastspec
+  real(kind=dp), dimension(:,:), allocatable :: lastspec, rawspec
   real(kind=dp) :: efermi(2), nelectrons(2), lvec(3,3), w_step
   real(kind=dp) :: matrix_cmpt(6), e_nks, f_nks, smear_factor
   integer :: ltstate(2) ! index of the lowest state we can transition to in each spin.
@@ -165,6 +264,7 @@ module core_level_spectra
     if (allocated(eigen)) deallocate(eigen)
     if (allocated(spectrum)) deallocate(spectrum)
     if (allocated(lastspec)) deallocate(lastspec)
+    if (allocated(rawspec)) deallocate(rawspec)
     
     ! Reset defaults
     lorentzian_width = 0.3d0 ! eV
@@ -468,11 +568,17 @@ module core_level_spectra
     ! By default the smearing value is just a constant width.
     smear_value = lorentzian_width
     
+    ! rawspec here will be the UNBROADENED spectrum, with only 
+    ! the lorentzian projection used to project the eigenvalues
+    ! onto the nearest spectrum value.
     if (allocated(lastspec)) deallocate(lastspec)
+    if (allocated(rawspec)) deallocate(rawspec)
     
     allocate(lastspec(spectrum_points,6))
+    allocate(rawspec(spectrum_points,6))
     
     lastspec = 0.0d0
+    rawspec = 0.0d0
     
     do ns=1,nspins
       do nk=1,nkpts
@@ -506,10 +612,15 @@ module core_level_spectra
             write(*,*) "Band: ", nb, "Eigen:", e_nks
           end if
           
-          do iw=1,spectrum_points
-            smear_value = lorentzian_width + linear_broadening * w(iw)
+          ! EDIT 26Apr2013: Fix smearing at half the energy step size. This is just to 
+          ! project every eigenvalue mostly onto one spectrum point, weighted by the
+          ! distance to that spectrum point.
+          smear_value = w_step / 2.0d0
           
-            ! Lifetime broadening.
+          do iw=1,spectrum_points
+            !smear_value = lorentzian_width + linear_broadening * w(iw)
+          
+            ! Lorentzian projection factor.
             smear_factor = invpi * smear_value / ((e_nks - w(iw))**2 + &
             &              (smear_value)**2)
 
@@ -522,16 +633,23 @@ module core_level_spectra
       end do
     end do
     
-    ! Gaussian broadening.
+    rawspec = lastspec
+    
+    ! Broadening routines.
     do icmpt=1,6
+      call lorentzian_linear_convolute(w, lastspec(:,icmpt), spectrum_points, &
+      & lorentzian_width, linear_broadening)
       call gaussian_convolute(w, lastspec(:,icmpt), spectrum_points, gaussian_broadening)
     end do
     
-    ! Zero tiny values
+    ! Zero tiny values in both rawspec and lastspec
     do iw=1,spectrum_points
       do icmpt=1,6
         if (dabs(lastspec(iw,icmpt)) .lt. tol) then
           lastspec(iw,icmpt) = 0.0d0
+        end if
+        if (dabs(rawspec(iw,icmpt)) .lt. tol) then
+          rawspec(iw,icmpt) = 0.0d0
         end if
       end do
     end do
