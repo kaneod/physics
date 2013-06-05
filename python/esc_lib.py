@@ -626,23 +626,34 @@ def castep_read_bands(filename):
     efermi = [float(x) for x in lines[4].split()[5:]]
   data = lines[9:]
   
+  bandsdict = {}
   bands = []
-  
+  kptdict = {}
+
   for k in range(nkpts):
-    # Skip the kpoint line  
+    # Read the kpoint line because they aren't necessarily in order.
+    kptnum = int(data[0].split()[1])
+    kpt = array([float(x) for x in data[0].split()[2:5]])
+    kptdict[kptnum] = kpt
     data = data[1:]
     for s in range(nspins):
       data = data[1:]
       tmp = data[0:nbands[s]]
-      bands.append(array([float(x.strip()) for x in tmp]))
+      bandsdict[kptnum] = array([float(x.strip()) for x in tmp])
       data = data[nbands[s]:]
-  props = {}
+
+  for k in range(nkpts):
+    bands.append(bandsdict[k+1])
   
+  bands = array(bands)
+
+  props = {}  
   props["nbands"] = nbands
   props["nkpts"] = nkpts
   props["nspins"] = nspins
   props["efermi"] = efermi
   props["nelectrons"] = nelectrons
+  props["kpts"] = kptdict
   
   return bands, props
 
