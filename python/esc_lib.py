@@ -1190,6 +1190,47 @@ def write_xsf(filename, positions, species, lattice=None, letter_spec=True):
         
     f.close()
     return True
+
+def write_aims(filename, positions, species, lattice, xtype="ang", opt=None, timestep=0):
+  """ succeeded = write_aims(filename, positions, species, lattice, opt=None, timestep=0)
+
+    Writes a FHI-aims geometry.in file using the given positions, species and lattice. 
+
+    FHI-aims allows either periodic or non-periodic boundary conditions. For periodic,
+    specify xtype="frac" and provide lattice vectors. For non-periodic, specify xtype=
+    "ang". No lattice vectors will be written in that case.
+
+  """
+
+  pos = positions[timestep]
+  spec = species[timestep]
+
+  if xtype == "frac":
+    avec = lattice[timestep]
+    pos = cart2reduced(pos, avec)
+    avec = bohr2ang(avec)
+  elif xtype == "ang":
+    pos = bohr2ang(pos)
+  else:
+    print "write_aims ERROR: Must specify xtype=ang or frac."
+    return False
+
+  f = open(filename, 'w')
+  f.write("# geometry.in written by esc_lib.py\n\n")
+  if xtype == "ang":  
+    for s, p in zip(spec, pos):
+      f.write("atom  %4.8g %4.8g %4.8g %s\n" % (p[0], p[1], p[2], elements[s]))
+  elif xtype == "frac":
+    for l in avec:
+      f.write("lattice_vector %4.8g %4.8g %4.8g\n" % (l[0], l[1], l[2]))
+    
+    f.write("\n")
+    for s, p in zip(spec, pos):
+      f.write("atom_frac  %4.8g %4.8g %4.8g %s\n" % (p[0], p[1], p[2], elements[s]))
+  
+  f.close()
+
+  return True
     
 def write_castep(filename, positions, species, lattice, xtype="ang", opt=None, timestep=0):
   """ succeeded = write_castep(filename, positions, species=None, xtype="bohr", opt=None, timestep=0)
@@ -3144,5 +3185,16 @@ class Atoms:
       """
       
       return write_castep(filename, self.positions, self.species, self.lattice, xtype, opt, timestep)  
+
+    def writeAims(self, filename, xtype="ang", opt=None, timestep=0):
+      """ success = Atoms.writeAims(filename, xtype="ang", opt=None, timestep=0)
+      
+      Member function wrapper for esc_lib.write_aims
+
+      """
+
+      return write_aims(filename, self.positions, self.species, self.lattice, xtype, opt, timestep)
+
+
 
             
