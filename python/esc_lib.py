@@ -50,7 +50,7 @@ DEBUG=1
 
 # Element dictionaries
 
-elements = { 1 : "H", 2 : "He", 3 : "Li",  4 : "Be", 5 : "B", 6 : "C", 7 : "N" , 8 : "O", 9 : "F", 29 : "Cu", 14 : "Si" , 13 : "Al"}
+elements = { 1 : "H", 2 : "He", 3 : "Li",  4 : "Be", 5 : "B", 6 : "C", 7 : "N" , 8 : "O", 9 : "F", 29 : "Cu", 14 : "Si" , 13 : "Al", 83 : "Bi"}
 xsf_keywords = ["ANIMSTEPS", "CRYSTAL", "ATOMS", "PRIMVEC", "PRIMCOORD"]
 bond_lengths = {"CH" : 2.06, "CC" : 2.91, "NC" : 2.78, "NH" : 1.91, "HH" : 2.27}
 
