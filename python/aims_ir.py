@@ -76,6 +76,7 @@ xyz.close()
 
 ncpos = []
 ncspec = []
+ncdx = []
 irfreq = []
 irintens = []
 
@@ -89,22 +90,26 @@ while i < len(data):
   irintens.append(float(commentbits[8]))
   curpos = []
   curspec = []
+  curdx = []
   for j in range(i+2,i+2+numat):
     linebits = data[j].split()
     curpos.append([float(x) for x in linebits[1:4]])
+    curdx.append([float(x) for x in linebits[4:7]])
     curspec.append(linebits[0])
   ncpos.append(curpos)
+  ncdx.append(curdx)
   ncspec.append(curspec)
   i += 2+numat
 
-# Now compute the dx values of all the ncpos relative to pos.
-ncdx = []
+## Now compute the dx values of all the ncpos relative to pos.
+#ncdx = 
 
-for ncp in ncpos:
-  curdx = []
-  for atp, atncp in zip(pos, ncp):
-    curdx.append(atncp - atp)
-  ncdx.append(curdx)
+#for ncp in ncpos:
+#  curdx = []
+#  for atp, atncp in zip(pos, ncp):
+#    curdx.append(atncp - atp)
+#    #curdx.append(atncp)
+#  ncdx.append(curdx)
 
 # Now we can write everything. Must convert everything to atomic units first!
 
