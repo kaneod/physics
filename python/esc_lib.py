@@ -2,7 +2,7 @@
 #
 # esc_lib.py
 #
-# Library of electronic-structure related code.
+# Library of electronic-structure related code
 #
 ################################################################################
 #
@@ -28,6 +28,10 @@
 # 1. Internally we *always* use atomic units (bohr, hartree, etc) and provide 
 # converter routines to deal with other common units such as ang and eV.
 #
+# 2. In this version, a lot of the redundant stuff that can be done well in other
+# public codes has been removed, e.g. NEXAFS stuff. If you really want it, go
+# to esc_lib.old.py.
+#
 ################################################################################
 
 
@@ -40,8 +44,6 @@ from scipy.interpolate import interp1d
 from scipy.integrate import quad
 from scipy.special import sph_harm
 from scipy.optimize import leastsq, curve_fit, fmin_slsqp
-#from scipy.optimize import minimize
-#from libabitools import io, wave, spectra
 from scipy.io import netcdf
 import os
 
@@ -69,236 +71,45 @@ def getElementZ(elstr):
     except ValueError:
         # Not an integer.
         if elstr.title() not in elements.values():
-            raise ESCError("getELementZ", "Element %s is not in the elements dictionary. Returning -1." % elstr)
-            return -1
+            print "(libesc.getElementZ) Warning: Element %s is not in the elements dictionary. Returning 0 for element Z." % elstr
+            return 0
         else:
             for key, value in elements.items():
                 if elstr.title() == value:
                     return key
-                    
-def getBondLengths(positions, species, cutoff=3.0, give_species=False):
-        """ bonds = getBondLengths(positions, species, cutoff=3.0, give_species=False)
-        
-        Returns a list of bond specs [i, j, length] for all pairwise
-        distances less than the cutoff distance (default: 3.0 Bohr) for
-        the specified animation step (default: first step, ie 0).
-        
-        If give_species=True, the bond spec includes the species abbreviation:
-        
-        [i, Zi, j, Zj, length]
-        
-        """
-        
-        bonds = []
-        for i in range(len(positions)):
-            for j in range(i, len(positions)):
-                if i is not j:
-                    pair = norm(positions[i] - positions[j])
-                    if pair < cutoff:
-                        if give_species:
-                            bonds.append([i,elements[species[i]], j, elements[species[j]], pair])
-                        else:
-                            bonds.append([i, j, pair])
-        
-        return bonds
 
-def gl_smear(x, y, xs, gw=None, lw=None, cutoff=10):
-  """ xs, ys = gl_smear(x, y, xs, gw=None, lw=None,cutoff=10)
-    
-  Using a set of reference values given by x and y, create a spectrum ys
-  over the range xs by applying a Gaussian/Lorentzian smearing algorithm:
+def substringInList(substring, list):
+  """ line = substringInList(substring, list)
   
-  ys(xs) = sum(x) [y(x) * {gaussian(x-xs, gw) + lorentzian(x-xs, lw)}]
-  
-  The gw and lw parameters are the width characteristic for the gaussian
-  and lorentzian respectively. If gw or lw is None, a dynamic smearing will
-  be used:
-  
-  gw(xs[i]) = 0.25 * (xs[i+1] - xs[i-1])
-  
-  The cutoff parameter can be used to set a low-pass filter on the y data - if
-  y > cutoff, it won't be contributed to the spectrum.
-  
-  NOTE: This gl_smear is incorrect - needs a weighting factor between the gaussian
-  and lorentzian to maintain normalization (amongst other things). 
+  If substring is a substring of any of the lines in the passed list, return the line
+  index. If not, return False. First instance only!
   
   """
   
-  # Constants to speed up function evaluation
-  g_pre = 1.0 / sqrt(2 * pi)
-  l_pre = 1.0 / pi
+  for i, line in enumerate(list):
+    if substring in line:
+      return i
   
-  # Need some functions here
-  def gaussian(p,w):
-    return g_pre / w * exp(-0.5 * (p ** 2) /  (w ** 2))
-    
-  def lorentzian(p,w):
-    return l_pre * w / (p ** 2 + w ** 2)
-    
-  ys = zeros((len(xs)))
-  dg = []
-  dl = []
+  return False
   
-  # Set smearing width
-  if gw is None:
-    for i in range(len(xs)):
-      if i == 0:
-        dg.append(abs(0.5 * (xs[1] - xs[0])))
-      elif i == len(xs) - 1:
-        dg.append(abs(0.5 * (xs[-1] - xs[-2])))
-      else:
-        dg.append(abs(0.25 * (xs[i+1] - xs[i-1])))
+def substringPositionsInList(substring, list):
+  """ line_indices = substringPositionsInList(substring, list)
+  
+  Same as substringInList but returns ALL line indices. Slower because
+  it always goes through the whole list.
+  
+  """
+  
+  line_indices = []
+  for i, line in enumerate(list):
+    if substring in line:
+      line_indices.append(i)
+  
+  if len(line_indices) > 0:
+    return line_indices
   else:
-    dg = [gw] * len(xs)
-    
-  if lw is None:
-    for i in range(len(xs)):
-      if i == 0:
-        dl.append(abs(0.5 * (xs[1] - xs[0])))
-      elif i == len(xs) - 1:
-        dl.append(abs(0.5 * (xs[-1] - xs[-2])))
-      else:
-        dl.append(abs(0.25 * (xs[i+1] - xs[i-1])))
-  else:
-    dl = [lw] * len(xs)
-    
-  # Calculate combined smeared function
-  for i, xsi in enumerate(xs):
-    for xi,yi in zip(x,y):
-      if yi < cutoff:
-        ys[i] = ys[i] + yi * (gaussian(xsi - xi, dg[i]) + lorentzian(xsi - xi, dl[i]))
+    return False
   
-  return ys
-    
-def rotate_positions(positions, filename, fileopt=0):
-  """ new_positions = rotate_positions(positions, filename, fileopt=0)
-    
-    Rotates specified coordinates around a specified axis and returns the new positions.
-    Can be used, for example, to rotate portions of a molecule. The rotations come
-    from a file in the form:
-    
-    i1 i2 i3 theta
-    ...
-    ...
-    
-    (if fileopt = 0) where i1 is the atomic index to be rotated and the axis is 
-    formed as the vector between atoms i2 and i3. Rotation is CLOCKWISE 
-    viewed along the axis.
-    
-    If fileopt is 1, the format is i1, x1, x2, x3, o1,o2, o3, theta, where xi 
-    give the actual axis and the oi give the origin of the vector xi for the 
-    rotation. The units of the axis x don't matter, vector o must be given
-    in atomic units (bohr).
-    
-    Comments marked with # or ! are ignored in the rotation file.
-    
-    NOTE: the indices i1, i2, etc are 1-based, to align with XCrysden, not
-    0-based. We convert inside this routine.
-    
-  """
-  
-  new_positions = positions
-  
-  f = open(filename)
-  lines = f.readlines()
-  lines = remove_comments(lines, "#")
-  lines = remove_comments(lines, "!")
-  
-  indices = []
-  axes = []
-  origins = []
-  angles = []
-  
-  for line in lines:
-    bits = line.split()
-    indices.append(int(bits[0]) - 1) # remember to subtract 1 from the indices
-                                     # since python is 0-based!
-    if fileopt == 0:
-      a = int(bits[1]) - 1
-      b = int(bits[2]) - 1
-      axes.append(positions[b] - positions[a])
-      origins.append(positions[a])
-      angles.append(float(bits[3]))
-    elif fileopt == 1:
-      axes.append(array([float(x) for x in bits[1:4]]))
-      origins.append(array([float(x) for x in bits[4:7]]))
-      angles.append(float(bits[7]))
-    else:
-      print "rotate_positions: ERROR - fileopt must be 0 or 1, not %d" % fileopt
-  
-  for i,a,o,t in zip(indices, axes, origins,angles):
-    new_positions[i] = rotate(positions[i], a, o, t)
-  
-  return new_positions
-  
-def rotate(pos, axis, origin, angle):
-  """ new_vec = rotate(pos, axis, origin, angle)
-    
-    Rotates a coordinate pos by the specified angle, CLOCKWISE looking along
-    axis. Origin of the rotation axis vector is given by the origin parameter,
-    the position coordinate pos is assumed to have an origin of (0,0,0) and is 
-    converted to a vector with respect to origin before the calculation and 
-    restored afterwards.
-    
-  """
-  
-  # Find the vector from origin to pos.
-  v = pos - origin
-    
-  # Convert angle to radians
-  r = float(angle) * pi / 180
-    
-  # Make sure axis is normalized
-  ux, uy, uz = axis/norm(axis)
-    
-  # Matrices
-  UU = matrix([[ux * ux, ux * uy, ux * uz],
-               [ux * uy, uy * uy, uy * uz],
-               [ux * uz, uz * uy, uz * uz]])
-  
-  UX = matrix([[0, -uz, uy],
-               [uz, 0, -ux],
-               [-uy, ux, 0]])
-               
-  I = matrix([[1.0, 0.0, 0.0],
-              [0.0, 1.0, 0.0],
-              [0.0, 0.0, 1.0]])
-              
-  R = cos(r) * I + sin(r) * UX + (1.0 - cos(r)) * UU
-  
-  # Apply matrix to column vector of v and restore to a coordinate
-  
-  return array(R * matrix(v).T).flatten() + origin
-
-def gaussian_convolute(x, y, width):
-  """ convolved = gaussian_convolute(x, y, width)
-  
-  Convolute the data with a gaussian of width w.
-  
-  """
-  
-  yc = zeros(y.shape)
-  
-  for j in range(len(yc)):
-    cursum = 0.0
-    for i in range(len(x)):
-      cursum += y[i] * (1.0 / (width * sqrt(2 * pi))) * exp(-1.0 * (x[j] - x[i]) ** 2 / (2.0 * width ** 2))
-    yc[j] = cursum
-    
-  return yc
-  
-def normalize_integral(x, y):
-  """ yn = normalize_integral(x, y)
-  
-  Normalizes y to give a unit integral when integrated over x.
-  
-  """
-  
-  intsum = 0.0
-  for i in range(len(x)-1):
-    intsum += 0.5 * (x[i+1] - x[i]) * (y[i+1] + y[i])
-  
-  return y / intsum
   
 def integral_smoothing(data, period, pbc=False):
   """ smooth_data = integral_smoothing(data, period)
@@ -368,54 +179,6 @@ def integral_smoothing(data, period, pbc=False):
     
   return smooth
   
-def read_xy(filename, comment_delim="#"):
-  """ data = read_xy(filename, comment_delim="#")
-  
-  Reads a multi-column xy file, remove comments, returns as an array
-  
-  NOTE: This is redundant now that numpy has a loadtxt() method: should replace
-  all instances with loadtxt.
-  
-  """
-  
-  f = open(filename, 'r')
-  lines = f.readlines()
-  lines = remove_comments(lines, comment_delim)
-  f.close()
-  
-  data = zeros((len(lines), len(lines[0].split())))
-  
-  for i, line in enumerate(lines):
-    for j,bit in enumerate(line.split()):
-      data[i,j] = float(bit)
-      
-  return data
-  
-def sum_atoms(data, start, finish, option="LeaveFirstColumn"):
-  """ summed_data = sum_atoms(data, start, finish)
-  
-  Assuming an array of the format data[i,j,k], sum over the range in i
-  and return an array in the other two indices. 
-  
-  Option "LeaveFirstColumn" prevents summing over the first column and simply
-  copies the first set of values (for i = start). 
-  
-  """
-  
-  s = zeros((data.shape[1],data.shape[2]))
-  
-  if option == "LeaveFirstColumn":
-    cs = 1
-    s[:,0] = data[start,:,0]
-  else:
-    cs = 0
-    
-  for i in range(start,finish):
-    s[:,cs:] = s[:,cs:] + data[i,:,cs:]
-    
-  return s
-  
-  
 def read_seq_xy(filename, comment_delim="#", option=None):
   """ data = read_seq_xy(filename, comment_delim="#", option=None)
   
@@ -469,26 +232,6 @@ def read_seq_xy(filename, comment_delim="#", option=None):
     return data
   else:
     return array(data_blocks)
-  
-def read_ACF(filename):
-  """ charges, total_charge = read_ACF(filename)
-  
-  Reads the ACF.dat bader output and returns the charge on each atom
-  along with the total charge.
-  
-  """
-  
-  f = open(filename, 'r')
-  lines = f.readlines()
-  f.close()
-  
-  total_charge = float(lines[-1].split()[3])
-  
-  charges = []
-  for line in lines[2:-4]:
-    charges.append(float(line.split()[4]))
-    
-  return array(charges), total_charge
 
 def remove_comments(lines, comment_delim="#",just_blanks=False):
     """ stripped = remove_comments(lines, comment_delim="#", just_blanks=False)
@@ -657,8 +400,8 @@ def castep_read_bands(filename):
   
   return bands, props
 
-def elk_parse_bands(filename):
-  """ path, bands = elk_parse_bands(filename="BAND.OUT")
+def elk_read_bands(filename):
+  """ path, bands = elk_read_bands(filename="BAND.OUT")
   
   Reads in the BAND.OUT file from Elk (can optionally pass
   a different filename) and returns as an array. The first
@@ -691,25 +434,6 @@ def elk_parse_bands(filename):
       curset.append(float(bits[1]))
   
   return array(sets).T
-  
-def elk_write_bands(outfile="elk-bands.xy", infile="BAND.OUT"):
-  """ result = elk_write_bands(outfile="elk-bands.xy", infile="BAND.OUT")
-  
-  Reads in the BAND.OUT file (another filename can optionally be specified
-  in infile) and writes to a multi-column, tab-delimited xy file for plotting.
-  
-  """
-  
-  data = elk_parse_bands(infile)
-  
-  f = open(outfile, 'w')
-  
-  for i in range(data.shape[0]):
-    f.write("\t".join([str(x) for x in data[i,:]]) + "\n")
-    
-  f.close()
-  
-  return True
   
 def abinit_read_dos(filename, properties=True):
   """ dos[, properties] = abinit_read_dos(filename, properties=True)
@@ -1134,6 +858,112 @@ def write_cube_density(filename, positions, species, lattice, densities, timeste
     
     return write_cube(filename, positions, species, lattice, densities[timestep], timestep)
     
+def write_xyz(filename, positions, species):
+  """ succeeded == write_xyz(filename, positions, species)
+  
+  Writes an XYZ file, dimensions in angstroms and using the chemical symbol (not the Z
+  number) as the identifier on each line. All positions are written so animation is supported.
+  
+  If len(species) = len(positions), the species array at each timestep is used, otherwise
+  species[0] is used for all and there better not be changes in the number of atoms!
+  
+  """
+  
+  f = open(filename, 'w')
+  
+  apos = bohr2ang(positions)
+  
+  if len(apos) == len(species):
+    for step, pos, spec in enumerate(zip(apos, species)):
+      f.write(str(len(pos))+"\n")
+      f.write("Created by libesc.py - step %d.\n" % step)
+      for z, p in zip(spec, pos):
+        if z in elements.keys():
+          s = elements[z]
+        else:
+          s = "UKN"
+        f.write("%s\t\t%10.5g\t%10.5g\t%10.5g\n" % (s, p[0], p[1], p[2]))
+  else:
+    spec = species[0]
+    for step, pos in enumerate(apos):
+      f.write(str(len(pos))+"\n")
+      f.write("Created by libesc.py - Animation step %d.\n" % step)
+      for z, p in zip(spec, pos):
+        if z in elements.keys():
+          s = elements[z]
+        else:
+          s = "UKN"
+        f.write("%s\t\t%10.5g\t%10.5g\t%10.5g\n" % (s, p[0], p[1], p[2])) 
+  
+  f.close()
+  return True
+  
+def write_molden(filename, positions, species, opt={}):
+  """ succeeded = write_molden(filename, positions, species, opt={})
+  
+  Writes a .molden file with any animation sequence put in the [GEOMETRIES] section.
+  Eventually there will be an option to output normal coordinates for vibrations.
+  
+  Options:
+    "converged main geometry" : Boolean - if True (default), the FINAL set of positions
+    is used for the main Atoms section on the basis that it is the converged geometry.
+    If False, the FIRST set of positions is used. 
+  
+  """
+      
+  f = open(filename, 'w')
+  apos = bohr2ang(positions)
+  
+  f.write("[Molden Format]\n")
+  f.write("[Atoms] Angs\n")
+  
+  if "converged main geometry" in opt.keys():
+    if not opt["converged main geometry"]:
+      maingeom = apos[0]
+      mainspec = species[0]
+    else:
+      maingeom = apos[-1]
+      mainspec = species[-1]
+  else:
+    maingeom = apos[-1]
+    mainspec = species[-1]    
+  
+  for j, (z, p) in enumerate(zip(mainspec, maingeom)):
+    if z in elements.keys():
+      s = elements[z]
+    else:
+      s = "UKN"
+    f.write("%s\t%d\t%d\t%10.5g\t%10.5g\t%10.5g\n" % (s, j+1, z, p[0], p[1], p[2]))
+  
+  # Geometries
+  f.write("[GEOMETRIES] XYZ\n")
+  
+  if len(apos) == len(species):
+    for step, (pos, spec) in enumerate(zip(apos, species)):
+      f.write(str(len(pos))+"\n")
+      f.write("Created by libesc.py - step %d.\n" % step)
+      for z, p in zip(spec, pos):
+        if z in elements.keys():
+          s = elements[z]
+        else:
+          s = "UKN"
+        f.write("%s\t\t%10.5g\t%10.5g\t%10.5g\n" % (s, p[0], p[1], p[2]))
+  else:
+    spec = species[0]
+    for step, pos in enumerate(apos):
+      f.write(str(len(pos))+"\n")
+      f.write("Created by libesc.py - Animation step %d.\n" % step)
+      for z, p in zip(spec, pos):
+        if z in elements.keys():
+          s = elements[z]
+        else:
+          s = "UKN"
+        f.write("%s\t\t%10.5g\t%10.5g\t%10.5g\n" % (s, p[0], p[1], p[2]))
+  
+  f.close()
+  
+  return True
+  
 def write_xsf(filename, positions, species, lattice=None, letter_spec=True):
     """ succeeded = write_xsf(filename, positions, species, lattice=None, letter_spec=True)
     
@@ -1489,38 +1319,6 @@ def g_vectors(bvec, ngrid):
         
   
   return array(gvs), [gcx, gcy, gcz], biggest
-
-def integrate_grids(a, b):
-  """ result =  integrate_grids(a, b)
-  
-  Performs a triple integration of a, b (complex) 
-  over their own grids.
-  
-  Note: this is a LOT slower than the Fortran version in
-  libdft.
-  
-  """
-  
-  # Check the shapes are the same
-  if (a.shape != b.shape):
-    print "(integrate_grids) ERROR: a and b don't have the same shape!"
-    return None
-  
-  # Construct integrand a.conj() * b
-  
-  igrnd = a.conj() * b
-  
-  isum = 0.0+0j
-  nx = a.shape[0]
-  ny = a.shape[1]
-  nz = a.shape[2]
-  
-  for k in range(nz):
-    for m in range(ny):
-      for i in range(nx):
-        isum += igrnd[i,m,k]
-  
-  return isum/(nx*ny*nz)
   
 def cart2reduced(position, lattice):
     """ reduced = cart2reduced(position, lattice)
@@ -1628,648 +1426,6 @@ class ESCError(Exception):
         print expr
         print msg
         
-class Spectra:
-  """ Spectra class: designed to deal with common manipulations on
-  spectra output by electronic structure codes like Abinit.
-  
-  Print Spectra.__init__.__doc__ to see the various ways you can
-  construct a Spectra object.
-  
-  """
-  
-  def __init__(self, seed, atoms,source):
-    """ spectra = Spectra(seed, atoms, source)
-    
-    Create a Spectra object. For conducti output, use source="conducti". For 
-    nexspec output, use source="nexspec". Should also add conventional CASTEP
-    ELNES task output here (will be source="castep"). 
-    
-    For nexspec output, set atoms to a number indicating the species you want to
-    read in. For conducti output, atoms should be a range (indicating the 1-based atom
-    indices from the original abinit input file.
-    
-    If the nexspec output is a series of separate runs with files of the form:
-    
-    SEED_X_S_1_1_1.nexafs
-    
-    where X is an atom identifier (usually means the location of the core hole)
-    and S is the species (the 1s could foreseeably vary but typically won't), you
-    can specify source="nexspec-corehole" to parse the atomic index correctly. 
-    
-    """
-    
-    if source == "conducti":
-      opt = {'seed name' : seed, 'atoms' : atoms}
-      self.loadConductiPawCore(opt)
-    elif source == "nexspec":
-      self.loadNexspec(seed, atoms)
-    elif source == "nexspec-corehole":
-      self.loadNexspec(seed, atoms, option="corehole")
-      
-  def loadNexspec(self, seed, species, option=""):
-    """ Spectra.loadNexspec(seed, species, option="")
-    
-    Internal: inits a Spectra object from nexspec output based on the CASTEP ELNES
-    task.
-    
-    NOTE: We can't yet deal with the situation where there are multiple core level
-    spectra per atom (ie, 1s, 2s, 2p levels and so on). The current algorithm only
-    stores the highest nlm-combination or whatever comes last as listed by listdir.
-    
-    The option input can presently be:
-    
-    option="" (default) - file name format is SEED_S_X_B_C.nexafs, read the atom
-                          index from X and match the species to S.
-    
-    option="corehole" - file name format is SEED_X_S_A_B_C.nexafs, read the 
-                        atom index from X and match the species to S.
-    
-    """
-    
-    self.data = {}
-    self.atoms=[]
-    
-    # Cycle over the contents of the directory containing the nexspec .nexafs outputs
-    # and pick out/load the files starting with seed_atoms
-    head,tail = os.path.split(seed)
-    if head is "":
-      # We are in the current directory
-      files = os.listdir(os.getcwd())
-    else:
-      files = os.listdir(head)
-    
-    for filename in files:
-      if filename.startswith(seed) and filename.endswith(".nexafs") and int(filename.split("_")[-4]) == species:
-        if option == "corehole":
-          self.atoms.append(int(filename.split("_")[1]))
-          self.data[int(filename.split("_")[1])] = loadtxt(filename)
-        elif option == "":
-          self.atoms.append(int(filename.split("_")[2]))
-          self.data[int(filename.split("_")[2])] = loadtxt(filename)
-    
-    self.cmpts = zeros((len(self.atoms), self.data[self.atoms[0]].shape[0],7))
-    
-    for i,a in enumerate(self.atoms):
-      # Now: we have to stick to our rule of always storing and dealing in Hartree
-      # atomic units. The nexspec output is in eV, so convert.
-      self.data[a][:,0] = eV2hartree(self.data[a][:,0])
-      self.cmpts[i,:,:] = self.data[a][:,0:7]
-    
-  def loadConductiPawCore(self, opt):
-    """ Spectra.loadConductiPawCore(opt)
-    
-    Internal: inits a Spectra object from Conducti PAW core-level outputs.
-    
-    Note: We can't deal with multiple core-levels in the same file (yet). These will
-    be ignored in the read.
-    
-    """
-    
-    self.data = {}
-    self.atoms = opt['atoms']
-    self.spectra_type = "conducti_paw_core"
-      
-    for i in self.atoms:
-      filename = opt['seed name']+str(i)
-      self.data[i] = loadtxt(filename)
-      
-    # Construct a cmpts array (natoms,npoints,2) from data.
-    
-    self.cmpts = zeros((len(self.atoms), self.data[self.atoms[0]].shape[0],7))
-    
-    for i,a in enumerate(self.atoms):
-      self.cmpts[i,:,:] = self.data[a][:,0:7]
-      
-  def spectrumAXYZ(self, atom, evec):
-    """ spectrum = Spectra.spectrumAXYZ(atom, evec)
-    
-    Generates the spectrum for a given electric field direction
-    and atom.
-    
-    The evec vector is normalized before use. The spectrum is returned as a
-    two-column array with the second column the spectrum and the first column
-    the independent variable.
-    
-    """
-    
-    # Construct spectrum from components
-    cmpts = self.data[atom]
-                    
-    return spectra.spectrum_axyz(cmpts, evec)
-    
-  def spectrumXYZ(self, evec):
-    """ spectrum = Spectra.spectrumXYZ(evec)
-    
-    Generates the spectrum across all atoms for a given e-field direction.
-    
-    See spectrumAXYZ for more details.
-    
-    """
-    
-    return spectra.spectrum_xyz(self.cmpts, evec)
-    
-  def spectrumTP(self, theta, phi):
-    """ spectrum = Spectra.spectrumTP(theta,phi)
-    
-    Generates the spectrum across all atoms for a given e-field direction
-    expressed as (theta, phi) in spherical coordinates with theta the polar
-    angle with respect to the original z axis.
-    
-    """
-    
-    return spectra.spectrum_tp(self.cmpts, theta, phi)
-    
-  def spectrumComponents(self):
-    """ components = Spectra.spectrumComponents()
-    
-    Returns an array of the same shape as any of the Spectra.data[i]
-    but with the 1:6 components (inclusive) summed over all sets i.
-    
-    """
-    
-    components = zeros(self.data[self.atoms[0]].shape)
-    components[:,0] = self.data[self.atoms[0]][:,0]
-    
-    for a in self.atoms:
-      for i in [1,2,3,4,5,6]:
-        components[:,i] = components[:,i] + self.data[a][:,i]
-    
-    # Note we ignore the 7th column from conducti, it's just an arbitary combination
-    # of components set from conducti.
-    
-    components = components[:,0:7] # Cut off the last column
-    return components
-    
-  def writeSpectrumComponents(self,filename):
-    """ succeeded = Spectra.writeSpectrumComponents(filename)
-    
-    Writes out the output of Spectra.spectrumComponents() to disk
-    with the given filename.
-    
-    """
-    
-    f = open(filename, 'w')
-    cmpts = self.spectrumComponents()
-    
-    f.write("# Spectrum components from conducti and esc_lib.py\n")
-    f.write("#\n")
-    f.write("# E XX YY ZZ XY XZ YZ\n")
-    
-    for c in cmpts:
-      f.write("\t".join([str(x) for x in c])+"\n")
-      
-    f.close()
-    
-  
-  def spectrumATP(self, atom, theta, phi):
-    """ spectrum = Spectra.spectrumATP(atom, theta, phi)
-    
-    Generates a spectrum for *EFIELD* angles theta and phi with respect
-    to the coordinate system of the original cell used to compute the 
-    spectrum. Note that these angles are NOT those used in experiments as the 
-    incident light is at right angles to the e-field and the polarization
-    remains a free angle.
-    
-    Here theta is the polar angle (with respect to z axis) and phi is the
-    azimuthal angle in the xy plane.
-    
-    We assume theta and phi are in degrees and do the conversion.
-    
-    """
-    
-    cmpts = self.data[atom]
-                    
-    return spectra.spectrum_atp(cmpts, theta,phi)
-    
-  def optimizePeak(self,peak, maximize=True):
-    """ fit_result = Spectra.optimizePeak(peak)
-    
-    Finds the theta,phi that maximizes the given peak. Alternatively if
-    maximize=False, we minimize instead. We return the output of the
-    scipy.optimize minimize method.
-    
-    """
-    
-    i = spectra.closest_index_to_energy(self.cmpts[0,:,0],peak)
-    if maximize:
-      s = -1.0
-    else:
-      s = 1.0
-      
-    def optfunc(p):
-      return s * spectra.spectrum_tp(self.cmpts,p[0],p[1])[i,1]
-      
-    return minimize(optfunc,[rand()*180,rand()*360])
-  
-  def spectrumRandom(self, samples=1000):
-    """ spectrum = Spectra.spectrumRandom(samples=1000)
-    
-    Uses random numbers to generate angles for theta and phi, and sums
-    over the spectra generated for each random angle. Optionally set
-    samples to decide how many random angle sets are used.
-    
-    """
-    
-    spectrum = zeros((self.cmpts.shape[1], 2))
-    
-    for i in range(samples):
-      spectrum[:,1] = spectrum[:,1] + self.spectrumTP(rand()*180, rand()*360)[:,1]
-    
-    spectrum[:,0] = self.cmpts[0,:,0]
-    spectrum[:,1] = spectrum[:,1] / samples
-    return spectrum
-    
-  def fitXYZ(self, exp_data, energy_range=None, energy_offset=0.0):
-    """ a, b, c, I0, data = Spectra.fitXYZ(exp_data, energy_range=None, energy_offset=0.0)
-    
-    Takes an experimental spectrum (Nx2-shaped array, first column is energy,
-    second column is intensity) and finds the best linear combination of 
-    orthogonal spectra I0 * (aX+bY+cZ) to fit. Note that this is physically
-    incorrect but seems to be what people do in the papers...
-    
-    See the docstring for Spectra.bestFitToExperiment to find out more about
-    the parameters. The only difference is that here we do internal unit
-    conversions, assuming the exp_data is in eV.
-    
-    """
-    
-    if energy_range is None:
-      estart = 0
-      eend = self.cmpts.shape[1]
-    else:
-      estart = spectra.closest_index_to_energy(self.cmpts[0,:,0], energy_range[0])
-      eend = spectra.closest_index_to_energy(self.cmpts[0,:,0], energy_range[1])      
-
-    edat = exp_data.copy()   # So we don't mess with the input variable
-    edat[:,0] = eV2hartree(edat[:,0] - energy_offset)
-    print "Exp_data bounds: ", amin(edat[:,0]), amax(edat[:,0])
-    
-    y = interp1d(edat[:,0], edat[:,1], bounds_error=False, fill_value=0.0)
-    
-    # Get our three orthogonal spectra
-    X = spectra.spectrum_xyz(self.cmpts, [1,0,0])
-    Y = spectra.spectrum_xyz(self.cmpts, [0,1,0])
-    Z = spectra.spectrum_xyz(self.cmpts, [0,0,1])
-    
-    yexp = array([y(x) for x in self.cmpts[0,estart:eend+1,0]])
-    def fitfunc(p):
-      # Function is p[0] * (p[1] * X + p[2] * Y + p[3] * Z)
-      return norm(p[0] * (p[1] * X[estart:eend+1,1] + p[2] * Y[estart:eend+1,1] + p[3] * Z[estart:eend+1,1])-yexp)
-      
-    r = fmin_slsqp(fitfunc, [1000.0, 0.3, 0.3, 0.3], bounds=[[0.1,1e8],[0.0,1.0],[0.0,1.0],[0.0,1.0]], full_output=True)
-    cdat = spectra.spectrum_xyz(self.cmpts, [r[0][1],r[0][2],r[0][3]])
-    data = zeros((cdat.shape[0], 7))
-    data[:,0] = cdat[:,0]
-    data[:,1] = array([y(x) for x in self.cmpts[0,:,0]])
-    data[:,2] = r[0][0] * (r[0][1] * X[:,1] + r[0][2] * Y[:,1] + r[0][3] * Z[:,1])
-    data[:,3] = r[0][0] * r[0][1] * X[:,1]
-    data[:,4] = r[0][0] * r[0][2] * Y[:,1]
-    data[:,5] = r[0][0] * r[0][3] * Z[:,1]
-    data[:,6] = r[0][0] * cdat[:,1]
-    return r[0][1], r[0][2], r[0][3], r[0][0], data
-    
-    
-    
-  def bestFitToExperiment(self, exp_data, energy_range=None, energy_offset=0.0):
-    """ theta, phi, I0, data = Spectra.bestFitToExperiment(exp_data, energy_range=None, energy_offset=0.0)
-    
-    Takes an experimental spectrum (Nx2-shaped array, first column is energy,
-    second column is intensity) and perform a least squares fit over 
-    the specified energy range. If the energy range is omitted (or None), 
-    the whole range of the computed data is used. Note that the experimental
-    data is interpolated and set to zero outside the experimental energy range.
-    
-    The energy_offset parameter can be used to impose a rigid x-axis shift of
-    the computed values before fitting. If None, the optimal x-axis shift is
-    computed as a fitting parameter. By default the shift is 0.0, not None.
-    
-    Note that we do *not* do unit conversions here, these must be accounted
-    for before entry into the routine. The data output is a Nx3 array, first 
-    column is the energy scale, second is the experimental and third is the 
-    fitted computed data.
-    
-    """
-    
-    if energy_range is None:
-      estart = 0
-      eend = self.cmpts.shape[1]
-    else:
-      estart = spectra.closest_index_to_energy(self.cmpts[0,:,0], energy_range[0])
-      eend = spectra.closest_index_to_energy(self.cmpts[0,:,0], energy_range[1])
-    
-    if DEBUG:
-      print "Fitting computational data between indices %d and %d." % (estart, eend)
-      print "Exp_data range is", amin(exp_data[:,0]), amax(exp_data[:,0])
-    y = interp1d(exp_data[:,0], exp_data[:,1], bounds_error=False, fill_value=0.0)
-    ran = self.spectrumRandom()
-    
-    yexp = array([y(x-energy_offset) for x in self.cmpts[0,estart:eend+1,0]])
-    
-    def fitfunc(p):
-      # p[0] = theta, p[1] = phi, p[2] = I0, p[3] = mixing fraction
-      spec = spectra.spectrum_tp(self.cmpts, p[0],p[1])
-      return norm(p[2] * (p[3] * spec[estart:eend+1,1] + (1-p[3]) * ran[estart:eend+1,1]) - yexp)
-
-    r = fmin_slsqp(fitfunc, [45.0, 45.0, 100, 0.5], bounds=[[0.0,180.0],[0.0,360.0], [0.1, 1e5], [0.0, 1.0]], full_output=True, iter=1000, iprint=2, acc=1.0e-9, epsilon=0.001)
-    cdat = spectra.spectrum_tp(self.cmpts, r[0][0], r[0][1])
-    cdat[:,0] = cdat[:,0] - energy_offset
-    cdat[:,1] = r[0][2] * cdat[:,1]
-    rdat = r[0][2] * self.spectrumRandom()[:,1]
-    # Construct an output array with columns energy, experimental intensity,
-    # calculated best fit intensity, random component, oriented component.
-    data = zeros((cdat.shape[0], 5))
-    data[:,0] = cdat[:,0]
-    data[:,1] = array([y(x-energy_offset) for x in self.cmpts[0,:,0]])
-    data[:,2] = r[0][3] * cdat[:,1] + (1.0 - r[0][3]) * rdat 
-    data[:,3] = (1.0 - r[0][3]) * rdat
-    data[:,4] = r[0][3] * cdat[:,1]
-    return r[0][0], r[0][1],r[0][2],r[0][3], data
-       
-  def bestFitToFile(self, filename, energy_range=None,exp_offset=0.0, comp_offset=0.0):
-    """ theta, phi, I0, data = Spectra.bestFitToFile(filename, energy_range=None, energy_offset=0.0)
-    
-    Same as bestFitToExperiment but loads automatically from a file. The
-    pretty safe assumption here is that the experimental energy axis is in eV
-    whereas the stored spectra here are all in Hartree, so the spectra are
-    returned in Hartree. There are two offsets allowed, with exp_offset applied
-    to the X-axis of the experimental data and assumed to be in eV, and
-    comp_offset passed directly to bestFitToExperiment.
-    
-    """
-    
-    # Load experimental data, offset and convert to Ha.
-    expdat = loadtxt(filename)
-    expdat[:,0] = eV2hartree(expdat[:,0] - exp_offset)
-    
-    return self.bestFitToExperiment(expdat, energy_range, comp_offset)
-    
-class Atom:
-  """ Atom class: a single atom, as represented by, for example, a 
-  PAW data set.
-  
-  Create using Atom("my_atom.paw"), where the input file is the
-  abinit-formatted pseudopotential file. 
-  
-  """
-  
-  def __init__(self, pawfile):
-    """ atom = Atom(pawfile)
-    
-    Creates an atom object by reading a abinit PAW dataset.
-    
-    """
-    
-    # In the interests of future-proofing, offload to an internal.
-    self.loadFromAbinit(pawfile)
-  
-  def loadFromAbinit(self, pawfile):
-    """ Atom.loadFromAbinit(pawfile)
-    
-    Internal: initializes atom data from abinit PAW file.
-    
-    """
-    
-    f = open(pawfile)
-    lines = f.readlines()
-    f.close()
-    
-    # Grab the important bits from the header
-    
-    if "All-electron core wavefunctions" in lines[0]:
-    
-      self.element = lines[0].split()[9]
-      self.generation = lines[0].split("-")[3].strip()
-      
-      self.method = int(lines[1].split()[0])
-      self.nspinor = int(lines[1].split()[1])
-      self.nsppol = int(lines[1].split()[2])
-      
-      self.zatom = float(lines[2].split()[0])
-      self.zion = float(lines[2].split()[1])
-      self.pspdat = int(lines[2].split()[2])
-      
-      self.pspcod = int(lines[3].split()[0])
-      self.pspxc = int(lines[3].split()[1])
-      self.lmax = int(lines[3].split()[2])
-      
-      self.pspfmt = lines[4].split()[0]
-      self.creator = int(lines[4].split()[1])
-      
-      self.basis_size = int(lines[5].split()[0])
-      self.lmn_size = int(lines[5].split()[1])
-
-      self.orbitals = [int(x) for x in lines[6].split()[0:self.basis_size]]
-      self.number_of_meshes = int(lines[7].split()[0])
-      
-      self.mesh_info = []
-      self.mesh = []
-      for i in range(self.number_of_meshes):
-        meshbits = lines[8+i].split()
-        tmpdict = {}
-        tmpdict["type"] = int(meshbits[1])
-        tmpdict["size"] = int(meshbits[2])
-        tmpdict["rad_step"] = float(meshbits[3])
-        tmpdict["log_step"] = float(meshbits[4])
-        self.mesh_info.append(tmpdict)
-        j = arange(1,tmpdict["size"]+1)
-        if tmpdict["type"] == 1:
-          # Linear grid?
-          self.mesh.append(tmpdict["rad_step"] * j)
-        elif tmpdict["type"] == 2:
-          self.mesh.append(tmpdict["rad_step"] * (exp(tmpdict["log_step"] * (j - 1)) - 1)) 
-        
-        self.r_max = float(lines[8+self.number_of_meshes].split()[0])
-        data = lines[9+self.number_of_meshes:]
-                
-    else:
-      self.element = lines[0].split()[5]
-      self.generation = lines[0].split("-")[1].strip()
-    
-      self.zatom = float(lines[1].split()[0])
-      self.zion = float(lines[1].split()[1])
-      self.pspdat = int(lines[1].split()[2])
-    
-      self.pspcod = int(lines[2].split()[0])
-      self.pspxc = int(lines[2].split()[1])
-      self.lmax = int(lines[2].split()[2])
-      self.lloc = int(lines[2].split()[3])
-      self.mmax = int(lines[2].split()[4])
-      self.r2well = float(lines[2].split()[5])
-    
-      self.pspfmt = lines[3].split()[0]
-      self.creator = int(lines[3].split()[1])
-    
-      self.basis_size = int(lines[4].split()[0])
-      self.lmn_size = int(lines[4].split()[1])
-    
-      self.orbitals = [int(x) for x in lines[5].split()[0:self.basis_size]]
-      self.number_of_meshes = int(lines[6].split()[0])
-    
-      self.mesh_info = []
-      self.mesh = []
-      for i in range(self.number_of_meshes):
-        meshbits = lines[7+i].split()
-        tmpdict = {}
-        tmpdict["type"] = int(meshbits[1])
-        tmpdict["size"] = int(meshbits[2])
-        tmpdict["rad_step"] = float(meshbits[3])
-        tmpdict["log_step"] = float(meshbits[4])
-        self.mesh_info.append(tmpdict)
-        j = arange(1,tmpdict["size"]+1)
-        if tmpdict["type"] == 1:
-          # Linear grid?
-          self.mesh.append(tmpdict["rad_step"] * j)
-        elif tmpdict["type"] == 2:
-          self.mesh.append(tmpdict["rad_step"] * (exp(tmpdict["log_step"] * (j - 1)) - 1))
-      
-      self.r_cut = float(lines[7+self.number_of_meshes].split()[0])
-      self.shape_type = int(lines[8+self.number_of_meshes].split()[0])
-      self.rshape = float(lines[8+self.number_of_meshes].split()[1])
-      data = lines[9+self.number_of_meshes:]
-    
-    self.data = []
-    # Now go through and grab all the bits!
-    is_data = True
-    while (is_data):
-      # Header of the chunk specifies the length.
-      chunk = {}
-      chunk["title"] = data[0].split("=====")[1].strip()
-      chunk["comment"] = data[0].split("=====")[2].strip()
-      print chunk["title"]
-      # There are a few special chunks that have slightly different formatting
-      if "Dij0" not in chunk["title"] and "Rhoij0" not in chunk["title"]:
-        chunk["mesh index"] = int(data[1].split()[0])
-        if "VHntZC" in chunk["title"]:
-          try:
-            self.vloc_format = int(data[1].split()[1])
-          except ValueError:
-            # Some PAW files don't specify the vloc_format
-            self.vloc_format = 1 
-        elif "Core wave functions" in chunk["title"]:
-          chunk["core n"] = int(data[2].split()[0])
-          chunk["core l"] = int(data[2].split()[1])
-          chunk["core s"] = int(data[2].split()[2])
-          chunk["core E"] = float(data[3].split()[0]) / 2 # Convert immediately to Ha from Ry.
-          chunk["core occ"] = float(data[3].split()[1])
-          data = data[2:]
-        data = data[2:]
-        size = self.mesh_info[chunk["mesh index"] - 1]["size"]
-      else:
-        size = self.lmn_size * (self.lmn_size + 1) * 0.5
-        chunk["mesh index"] = -1
-        data = data[1:]
-      chunk["data"] = []
-      got_data = False
-      while not got_data:
-        for val in [float(x) for x in data[0].split()]:
-          chunk["data"].append(val)
-        if len(chunk["data"]) == size:
-          data = data[1:]
-          got_data = True
-        else:
-          data = data[1:]
-      chunk["data"] = array(chunk["data"])
-      self.data.append(chunk)
-      if len(data) == 0:
-        is_data = False
-    
-    if "paw" in self.pspfmt:
-      # Expand rhoij and dij matrices into a triangular matrix.
-      for i, d in enumerate(self.data):
-        if "Rhoij0" in d['title']:
-          self.iRhoij0 = i
-        elif "Dij0" in d['title']:
-          self.iDij0 = i
-    
-      self.Dij0 = zeros((self.lmn_size, self.lmn_size))
-      self.Rhoij0 = zeros((self.lmn_size, self.lmn_size))
-    
-      for row in range(1, self.lmn_size+1):
-        for column in range(1, row+1):
-          self.Dij0[row - 1, column - 1] = self.data[self.iDij0]['data'][(row  - 1 + (row -1 )** 2) / 2 + column - 1]
-          self.Rhoij0[row - 1, column - 1] = self.data[self.iRhoij0]['data'][(row - 1 + (row - 1) ** 2) / 2 + column - 1]
-          
-    # Make interpolators for the radial data so we don't need to construct
-    # them every time we need them.
-    self.interpolators = {}
-    for i, d in enumerate(self.data):
-      if d['mesh index'] != -1:
-        self.interpolators[i] = interp1d(self.mesh[d['mesh index'] - 1], d['data'])
-    
-  def radial2Cart(self, data_index, r, r0):
-    """ psi = Atom.radial2Cart(data_index, r, r0)
-    
-    Given an atomic centre r0, calculate the actual value of the requested function
-    in realspace at position r.
-    
-    r, r0 are expected to be 3-element numpy arrays.
-    
-    """
-    
-    # Check we're within the PAW cutoff radius.
-    if "paw" in self.pspfmt:
-      rcut = self.r_cut
-    elif "core" in self.pspfmt:
-      rcut = self.r_max
-    if norm(r - r0) > rcut:
-      return 0
-    if self.data[data_index]['mesh index'] == -1:
-      print "Requested data does not represent a radial function."
-      return None
-    else:
-      #ur = self.data[data_index]['data']
-      #rr = self.mesh[self.data[data_index]['mesh index'] - 1]
-      u = self.interpolators[data_index]
-      
-      # Use the title of the data to figure out which orbital
-      # this is (hence the angular momentum)
-      
-    l = self.orbitals[int(self.data[data_index]['title'].split()[-1])-1]
-    
-    # Get the spherical coordinates of our displacement vector  
-    s = r - r0
-    rho = norm(s)
-    # Need a different treatment if rho == 0.
-    if rho > 0:
-      theta = arccos(s[2]/rho)
-      phi = arctan2(s[1], s[0])
-    
-      # We aren't doing this in the presence of a magnetic field
-      # so we can just use m=0 for our spherical harmonic.
-      return u(rho) / rho * sph_harm(0,l,theta,phi)
-      
-    else:
-      theta = 0.0
-      phi = arctan2(s[1],s[0]) # Doesn't really matter what this is
-      
-      # Use a 3rd order polynomial fit to points close to the origin to extrapolate.
-      y = [u(x)/x for x in [0.001, 0.002, 0.003]]
-      z = polyfit([0.001, 0.002, 0.003], y, 3)
-      return poly1d(z)(0.0) * sph_harm(0,l,theta,phi)
-    
-  def expandOntoGrid(self, data_index, ngrid, avec, r0):
-    """ grid = Atom.expandOntoGrid(, data_index, ngrid, avec, r0)
-    
-    Expand the specified dataset onto a grid with grid
-    dimensions ngrid and unit vectors avec[i]/ngrid[i]. 
-    
-    Place the atomic sphere at position r0.
-    
-    """
-    
-    grid = zeros(ngrid, dtype="complex")
-    
-    for i in range(ngrid[0]):
-      for j in range(ngrid[1]):
-        for k in range(ngrid[2]):
-          r = (1.0 * i) /ngrid[0] * avec[0] + (1.0 * j)/ngrid[1] * avec[1] + (1.0 * k)/ngrid[2] * avec[2]
-          grid[i,j,k] = self.radial2Cart(data_index, r, r0)
-    
-    # Renormalize.
-    #inorm = integrate_grids(grid,grid)
-    #return grid/sqrt(inorm)
-    return grid         
-        
 class Atoms:
     """ Atoms class: a collection of atoms (possibly with a crystal structure)
     
@@ -2338,26 +1494,142 @@ class Atoms:
         
         if filetype == "XSF":
             self.loadFromXSF(filename)
-        elif filetype == "abinit":
+        elif filetype == "abinit,input":
             self.loadFromAbinit(filename)
-        elif filetype == "abi_density":
+        elif filetype == "abinit,density":
             self.loadFromAbinitDensity(filename)
-        elif filetype == "abi_wfk":
+        elif filetype == "abinit,wfk":
             self.loadFromAbinitWFK(filename)
-        elif filetype == "elk":
+        elif filetype == "elk,input":
             self.loadFromElk(filename)
-        elif filetype == "NetCDF":
+        elif filetype == "abinit,NetCDF":
             self.loadFromNetCDF(filename)
         elif filetype == "ETSF":
             self.loadFromETSF(filename)
-        elif filetype == "castep":
+        elif filetype == "castep,cell":
             self.loadFromCastep(filename)
-        elif filetype == "VASP":
+        elif filetype == "VASP,poscar":
             self.loadFromVASP(filename, options)
+        elif filetype == "aims,geometry":
+          self.loadFromAimsGeometry(filename)
+        elif filetype == "aims,output":
+          self.loadFromAimsOutput(filename)
         else:
           print "(esc_lib.Atoms.__init__) ERROR: File type %s not handled at present." % filetype
           return None
-    
+  
+    def loadFromAimsOutput(self, filename):
+      """ atoms = Atoms.loadFromAimsOutput(filename)
+      
+      Internal: loads geometry from a FHI-aims output file. The idea here is that
+      we can get the entire geometry sequence, for example, or phonon displacements or
+      whatever.
+      
+      """
+      
+      self.clean()
+      f = open(filename, 'r')
+      data = f.readlines()
+      f.close()
+      
+      # Reading the output is harder than the geometry: we have to look for markers
+      # in the output to tell us where we are in the file. Also, because the user
+      # can cancel the verbatim writing of the control.in and geometry.in files, we can't
+      # rely on those to start with: our first marker must be one that is always there.
+      # So, the initial geometry read is DIFFERENT from the subsequent ones.
+      
+      pos = []
+      spec = []
+      lvec = []
+      
+      # First thing we look for is "Reading geometry description geometry.in.".
+      idx = substringInList("Reading geometry description geometry.in.", data)
+      
+      # Next, we read how many atoms there are.
+      numatidx = substringInList("| Number of atoms", data)
+      numat = int(data[numatidx].split()[5])
+      
+      if idx:
+        # Chop data, locate if we have unit cell or not.
+        data = data[idx:]
+        idx = substringInList("No unit cell requested.", data)
+        if idx:
+          # Molecule, not crystal. Get the initial positions and species.
+          for line in data[(idx+3):(idx+3+numat)]:
+            spec.append(getElementZ(line.split()[3]))
+            pos.append(array([float(x) for x in line.split()[4:7]]))
+          self.positions.append(ang2bohr(pos))
+          self.species.append(spec)
+          self.is_crystal = False
+        else:
+          # Molecule is a crystal. Get the lattice vectors then the initial pos and spec.
+          idx = substringInList("| Unit cell:", list)
+          for line in data[(idx+1):(idx+4)]:
+            lvec.append(array([float(x) for x in line.split()[1:4]]))
+          for line in data[(idx+6):(idx+6+numat)]:
+            spec.append(getElementZ(line.split()[3]))
+            pos.append(array([float(x) for x in line.split()[4:7]]))
+          self.positions.append(ang2bohr(pos))
+          self.species.append(spec)          
+          self.lattice.append(ang2bohr(lvec))
+          self.is_crystal = True
+      else:
+        # This out file is broken: Didn't even get to initial calculation.
+        print "(Atoms.loadFromAimsOutput) ERROR: File is not a complete FHI-aims output. Returning None."
+        return None
+      
+      # Now get all the coordinate updates.
+      idxs = substringPositionsInList("Updated atomic structure:", data)
+      for i in idxs:
+        pos = []
+        for line in data[(i+2):(i+2+numat)]:
+          pos.append(array([float(x) for x in line.split()[1:4]]))
+        self.positions.append(ang2bohr(pos))
+           
+    def loadFromAimsGeometry(self, filename):
+      """ atoms = Atoms.loadFromAimsGeometry(filename)
+      
+      Internal, inits an Atoms object from a FHI-aims geometry.in file.
+      
+      """
+      
+      self.clean()
+      f = open(filename, 'r')
+      data = f.readlines()
+      f.close()
+      data = remove_comments(data, "#")
+      # aims is case-independent so we are too.
+      data = [s.lower() for s in data]
+      
+      # Easy: just have to read through each line and look for "atom" lines
+      # or "lattice_vector" lines.
+      pos = []
+      spec = []
+      lvec = []
+      
+      for line in data:
+        if line.split()[0] == "atom":
+          pos.append(array([float(x) for x in line.split()[1:4]]))
+          spec.append(getElementZ(line.split()[4]))
+        elif line.split()[0] == "lattice_vector":
+          lvec.append(array([float(x) for x in line.split()[1:4]]))
+      
+      # Ok bit of a bind here. For now, let's assume aims requires either
+      # three lattice vectors or none. If there is less than three, we assume
+      # the coords are actually abs positions.
+      
+      if len(lvec) < 3:
+        self.positions.append(ang2bohr(pos))
+        self.species.append(spec)
+        self.is_crystal = False
+      else:
+        lvec = ang2bohr(lvec)
+        self.lattice.append(lvec)
+        pos = ang2bohr(pos)
+        self.positions.append(reduced2cart(pos, lvec))
+        self.species.append(spec)
+        self.is_crystal = True
+      
     def loadFromCastep(self, filename):
       """ atoms = Atoms.loadFromCASTEP(filename)
       
@@ -2922,35 +2194,6 @@ class Atoms:
                 self.positions.append(positions)
                 self.forces.append(forces)
                 self.species.append(species)
-    
-#     def gradWF(self, spin, kpt, band, spinor):
-#       """ gx, gy, gz = Atoms.gradWF(spin,kpt,band,spinor)
-#       
-#       If this Atoms instance has a filehook to a ETSF WF file, return
-#       the gradient of a specific wavefunction using a FFT method.
-#       
-#       The returned grids are the components of the complex gradient
-#       with respect to the cartesian axes.
-#       
-#       """
-#       
-#       psi = self.getRealSpaceWF(spin,kpt,band,spinor)
-#       reduced_k = self.filehook.variables['reduced_coordinates_of_kpoints'][kpt]
-#       K = reduced2cart(reduced_k, self.recip_lattice[0])
-#       
-#       print "Got psi and K"
-#       psiG = fftn(psi)
-#       print "Got past fftn!"
-#       
-#       speed.grad_wf(K, self.g_vectors, psiG)
-#       grad = speed.grd[:]
-#       
-#       print "Got past grad!"
-#       gx = grad[:,:,:,0]
-#       gy = grad[:,:,:,1]
-#       gz = grad[:,:,:,2]
-#       
-#       return ifftn(gx), ifftn(gy), ifftn(gz)
                 
     def writeWFCube(self, filename, spin,kpt,band,spinor, option="density"):
       """ succeeded = Atoms.writeWaveFunctionCube(filename, spin, kpt, band, spinor, option="density")
@@ -2989,21 +2232,7 @@ class Atoms:
       wf_imag = self.filehook.variables['real_space_wavefunctions'][spin,kpt,band,spinor,:,:,:,1]
       
       return wf_real + 1j*wf_imag     
-                
-    def getBondLengths(self, cutoff=3.0, animstep=0, give_species=False):
-        """ bonds = Atoms.getBondLengths(cutoff=3.0, animstep=1, give_species=False)
-        
-        Returns a list of bond specs [i, j, length] for all pairwise
-        distances less than the cutoff distance (default: 3.0 Bohr) for
-        the specified animation step (default: first step, ie 0).
-        
-        If give_species=True, the bond spec includes the species abbreviation:
-        
-        [i, Zi, j, Zj, length]
-        
-        """
-        
-        return getBondLengths(self.positions[animstep], self.species[animstep], cutoff, give_species)
+          
         
     def orderAtoms(self, order=None):
       """ new_order = Atoms.orderAtoms(order=None)
@@ -3056,64 +2285,6 @@ class Atoms:
           
       return spec_idx
         
-    def autoUnLars(self, animstep=0, convtol=0.01, maxsteps=50, cutoff=2.2):
-        """ new_pos, pos_hist = Atoms.autoUnLars(animstep=0, convtol=0.01, maxsteps=50, cutoff=2.2)
-        
-        Attempts to fix positions generated by Lars automatically. This
-        might not work very well. Converges positions to convtol.
-        
-        Why? Because Dr Lars Thomsen likes the gunslinging approach to chemical
-        construction. He laughs in the face of the 2nd Law of Thermodynamics.
-        
-        """
-        
-        cur_pos = self.positions[animstep]
-        pos_hist = [cur_pos]
-        species = self.species[animstep]
-        bonds = self.getBondLengths(cutoff=cutoff, animstep=animstep, give_species=True)
-        
-        for itercount in range(0, maxsteps):
-            
-            shifts = len(cur_pos) * [array([0.0, 0.0,0.0])]
-            print shifts
-            
-            for bond in bonds:
-                # Figure out what the bond length *should* be:
-                s1 = species[bond[0]]
-                s2 = species[bond[2]]
-                if s1 > s2:
-                    btype = elements[s1] + elements[s2]
-                else:
-                    btype = elements[s2] + elements[s1]
-                    
-                if btype not in bond_lengths.keys():
-                    print "%s bond not accounted for." % btype
-                else:
-                    bproper = bond_lengths[btype]
-                    bvector = cur_pos[bond[0]] - cur_pos[bond[2]]
-                    bactual = bond[4]
-                    shift_factor = bproper / bactual
-                    shifts[bond[0]] = shifts[bond[0]] + 0.5 * (shift_factor - 1.0) * bvector
-                    shifts[bond[2]] = shifts[bond[2]] + -0.5 * (shift_factor - 1.0) * bvector
-                    print "%s bond. Length should be %g, actual is %g. Shift factor is %g." % (btype, bproper, bactual, shift_factor)
-            
-            # Move all atoms.
-            cur_pos = [c+s for (c,s) in zip(cur_pos, shifts)]
-            pos_hist.append(cur_pos)
-            
-            # Check convergence
-            diff = 0
-            for shift in shifts:
-                diff += norm(shift)
-                
-            if diff < convtol:
-                return cur_pos, pos_hist
-                
-            # Update our bond lengths
-            bonds = getBondLengths(cur_pos, species, cutoff=cutoff, give_species=True)
-        
-        
-        return cur_pos, pos_hist
     
     def generateConstraints(self, constrained_atoms):
       """ text_constraints = Atoms.generateConstraints(constrained_atoms)
@@ -3143,21 +2314,6 @@ class Atoms:
       text_constraints.append("%endblock ionic_constraints")
       
       return "\n".join(text_constraints)
-      
-    def rotateAtoms(rotation_file, fileopt=0, timestep=0):
-      """ success = Atoms.rotateAtoms(rotation_file, fileopt=0)
-      
-      Apply the rotations specified in rotation_file to an Atoms object positions.
-      
-      We can deal with animation steps here (Default is 0). See the rotate_positions
-      documentation for details on fileopt.
-      
-      """
-      
-      pos = self.positions[timestep]
-      self.positions[timestep] = rotate_positions(pos, rotation_file, fileopt)
-      
-      return True
       
     def writeXSF(self, filename):
       """ success = Atoms.writeXSF(filename)
@@ -3194,7 +2350,25 @@ class Atoms:
       """
 
       return write_aims(filename, self.positions, self.species, self.lattice, xtype, opt, timestep)
-
+  
+    def writeXYZ(self, filename):
+      """ success = Atoms.writeXYZ(filename)
+      
+      Simple wrapper to write an XYZ file from the atomic positions.
+      
+      """
+      
+      return write_xyz(filename, self.positions, self.species)
+      
+    def writeMolden(self, filename, opt=None):
+      """ success = Atoms.writeMolden(filename, opt=None)
+      
+      Simple wrapper to write a .molden file from the atomic positions. Options not 
+      implemented.
+      
+      """
+      
+      return write_molden(filename)
 
 
             
