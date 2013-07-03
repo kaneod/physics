@@ -3,7 +3,7 @@
 #
 # aims_ir.py
 #
-# Converts the geometry.in.SEED and SEED.xyz to a molden file for vibration
+# Converts the SEED.xyz to a molden file for vibration
 # viewing.
 #
 # Usage: aims_ir.py SEED
@@ -32,6 +32,10 @@
 # 1. Yes, this stuff could have been written into esc_lib, but the XYZ reading
 # routine is too specific here because FHI-aims uses the comment field for actual
 # data. Grr. So it's been kept out.
+# 
+# 2. Previously needed both the SEED.xyz and the geometry.in.SEED files, now
+# only need the xyz. The old code is left commented out here just in case this
+# turns out to be a mistake!
 #
 ################################################################################
 
@@ -43,30 +47,30 @@ DEBUG=1
 
 parser = argparse.ArgumentParser(description="Construct a Molden input file from a FHI-aims calculation.")
 
-parser.add_argument('seed', help="Need the SEED.xyz and geometry.in.SEED files for reconstruction.")
+parser.add_argument('seed', help="Need the SEED.xyz file for reconstruction.")
 args = parser.parse_args()
 
 xyz = open(args.seed+".xyz", 'r')
-geo = open("geometry.in."+args.seed, 'r')
+#geo = open("geometry.in."+args.seed, 'r')
 
-data = geo.readlines()
-geo.close()
-data = remove_comments(data, "#")
+#data = geo.readlines()
+#geo.close()
+#data = remove_comments(data, "#")
 # First read the initial geometry.
 
-pos = []
-spec = []
-lvec = []
+#pos = []
+#spec = []
+#lvec = []
       
-for line in data:
-  if line.split()[0] == "atom":
-    pos.append(array([float(x) for x in line.split()[1:4]]))
-    spec.append(line.split()[4])
-  elif line.split()[0] == "lattice_vector":
-    lvec.append(array([float(x) for x in line.split()[1:4]]))
+#for line in data:
+#  if line.split()[0] == "atom":
+#    pos.append(array([float(x) for x in line.split()[1:4]]))
+#    spec.append(line.split()[4])
+#  elif line.split()[0] == "lattice_vector":
+#    lvec.append(array([float(x) for x in line.split()[1:4]]))
       
-if len(lvec) == 3:
-  pos = reduced2cart(pos, lvec)
+#if len(lvec) == 3:
+#  pos = reduced2cart(pos, lvec)
 
 # Alright, pos is now our base geometry. Now we need to read the XYZ - the comments
 # have the IR frequencies and intensities.
@@ -101,31 +105,21 @@ while i < len(data):
   ncspec.append(curspec)
   i += 2+numat
 
-## Now compute the dx values of all the ncpos relative to pos.
-#ncdx = 
-
-#for ncp in ncpos:
-#  curdx = []
-#  for atp, atncp in zip(pos, ncp):
-#    curdx.append(atncp - atp)
-#    #curdx.append(atncp)
-#  ncdx.append(curdx)
-
 # Now we can write everything. Must convert everything to atomic units first!
 
 f = open(args.seed+".molden", 'w')
 f.write("[Molden Format]\n")
 f.write("[Atoms] AU\n")
-for i, p in enumerate(pos):
+for i, p in enumerate(ncpos[0]):
   p = ang2bohr(p)
-  f.write("%s\t%d\t%d\t%10.5f\t%10.5f\t%10.5f\n" % (spec[i], i+1, getElementZ(spec[i]), p[0], p[1], p[2]))
+  f.write("%s\t%d\t%d\t%10.5f\t%10.5f\t%10.5f\n" % (ncspec[0][i], i+1, getElementZ(ncspec[0][i]), p[0], p[1], p[2]))
 
 f.write("[FREQ]\n")
 for frq in irfreq:
   f.write("%10.5g\n" % frq)
 
 f.write("[FR-COORD]\n")
-for s, p in zip(spec, pos):
+for s, p in zip(ncspec[0], ncpos[0]):
   p = ang2bohr(p)
   f.write("%s\t%10.5f\t%10.5f\t%10.5f\n" % (s, p[0], p[1], p[2]))
 
