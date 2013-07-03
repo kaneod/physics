@@ -95,6 +95,9 @@ D = u3
 # Construct the b matrix
 bmat = matrix([b1, b2, b3])
 
+# Need our D vector in bulk primitive recip coords.
+D = asarray(dot(bmat.I, D.T)).reshape(-1)
+
 bulk_pts = []
 
 for p in pts:
