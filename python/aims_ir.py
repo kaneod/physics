@@ -43,7 +43,7 @@ import argparse
 from esc_lib import reduced2cart, ang2bohr, getElementZ, elements, remove_comments
 from numpy import array
 
-DEBUG=1
+DEBUG=0
 
 parser = argparse.ArgumentParser(description="Construct a Molden input file from a FHI-aims calculation.")
 
