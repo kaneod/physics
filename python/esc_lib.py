@@ -400,6 +400,129 @@ def castep_read_bands(filename):
   
   return bands, props
 
+def castep_generate_band_path(kpoints, keypoints,recip_lattice):
+  """ path, keyvalues = generate_band_path(kpoints, keypoints, recip_lattice)
+  
+  Generates a path in inverse angstrom units that can be used
+  as an x-axis for a bandstructure. kpoints can be a dictionary (keyed by an integer
+  1-based index, like the props['kpts'] property from castep_read_bands) or a list/array.
+  
+  keypoints is a list/array of kpoints that act as turning points. The output keyvalues
+  indicates the value along the path where the keypoint is or would be located.
+  
+  You need the reciprocal space lattice to make these distances meaningful - they aren't
+  even *relatively* correct if the primitive BZ is not a cube.
+  """
+  
+  # Tolerance for how close two vectors can be to be considered the same.
+  tol = 1.0e-6
+  
+  # If kpoints is a dictionary, make it a list.
+  if type(kpoints) == type({}):
+    kpts = []
+    for k in kpoints.keys():
+      kpts.append(kpoints[k])
+  elif type(kpoints) == type([]) or type(kpoints) == type(array([])):
+    kpts = kpoints
+  else:
+    print "(castep_generate_band_path) ERROR: Invalid input kpoints - must be array, list or dictionary."
+    return None
+    
+  # Expand all kpts into cartesian coordinates using the recip_lattice.
+  for i in range(len(kpts)):
+    kpts[i] = kpts[i][0] * recip_lattice[0] + kpts[i][1] * recip_lattice[1] + kpts[i][2] * recip_lattice[2]
+  
+  # The same for the keypoints.
+  for i in range(len(keypoints)):
+    keypoints[i] = keypoints[i][0] * recip_lattice[0] + keypoints[i][1] * recip_lattice[1] + keypoints[i][2] * recip_lattice[2]  
+  
+  # Algorithm is trickier than it appears: idea is to generate linear functions
+  # from the keypoints and continually ask if a given kpoint is on the current linear
+  # function. If it is, add it's distance along the linear function to the path, otherwise
+  # generate a new segment linear function.
+  
+  # First task is to make segments from the keypoints.
+  segments = []
+  segment_lengths = []
+  cumulative_segment_lengths = []
+  seg_starts = []
+  seg_ends = []
+  k_low = keypoints[0]
+  for k in keypoints[1:]:
+    segments.append(k - k_low)
+    segment_lengths.append(norm(k - k_low))
+    cumulative_segment_lengths.append(sum(segment_lengths[:-1]))
+    seg_ends.append(k)
+    seg_starts.append(k_low)
+    k_low = k
+  
+  if DEBUG:
+    print "Segments are:"
+    for s in segments:
+      print s
+    print "Segment lengths are:"
+    for s in segment_lengths:
+      print s
+    print "Cumulative segment lengths are:"
+    for s in cumulative_segment_lengths:
+      print s
+    print "Segment starts are:"
+    for s in seg_starts:
+      print s
+    print "Segment ends are:"
+    for s in seg_ends:
+      print s
+
+  # Now cycle through the kpoints. Three cases: either it is one of the keypoints,
+  # between the two (on the segment) or off the segment. 
+  path = []
+  keyvalues = []
+  current_segment = 0
+  current_kpoint = 0
+  finished = False
+  k = kpts[0]
+  while not finished:
+    #print "Current k is: ", current_kpoint, k, " Current segment:", current_segment
+    if norm(k - seg_starts[current_segment]) < tol:
+      # k is the starting point of this segment. Add to path, increment kpt.
+      #print "kpoint is the starting point of a segment!"
+      path.append(cumulative_segment_lengths[current_segment])
+      keyvalues.append(path[-1])
+      current_kpoint += 1
+    elif norm(k - seg_ends[current_segment]) < tol:
+      # k is the ending point of this segment. Add to path, increment kpoint AND segment.
+      #print "kpoint is the ending point of a segment!"
+      path.append(cumulative_segment_lengths[current_segment] + norm(k - seg_starts[current_segment]))
+      keyvalues.append(path[-1])
+      current_kpoint += 1
+      current_segment += 1
+    else:
+      # Check if it's on the current segment.
+      v = segments[current_segment]/norm(segments[current_segment])
+      kklow = (k - seg_starts[current_segment]) / norm(k - seg_starts[current_segment])
+      #print "Vector is neither a beginning or endpoint."
+      #print "v is: ", v, "kklow is ", kklow, "Norm is: ", norm(v - kklow)
+      if norm(v - kklow) < tol:
+        # k is on the segment. Add to path, increment kpoint.
+        #print "kpoint is on a segment!"
+        path.append(cumulative_segment_lengths[current_segment] + norm(k - seg_starts[current_segment]))
+        current_kpoint += 1
+      else:
+        # k is not on the segment. Can't add to path, increment segment.
+        #print "kpoint is NOT on this segment."
+        # The keyvalue, even though it isn't part of the path, must be the cumulative
+        # sum of the path lengths so far, as we calculated earlier.
+        current_segment += 1
+        keyvalues.append(cumulative_segment_path_lengths[current_segment])
+    
+    # Check to see if we're finished.
+    if current_kpoint == len(kpts):
+      finished = True
+    else:
+      k = kpts[current_kpoint]
+  
+  return path, keyvalues
+        
 def elk_read_bands(filename):
   """ path, bands = elk_read_bands(filename="BAND.OUT")
   
