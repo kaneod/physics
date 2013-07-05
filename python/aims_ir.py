@@ -6,7 +6,7 @@
 # Converts the SEED.xyz to a molden file for vibration
 # viewing.
 #
-# Usage: aims_ir.py SEED
+# Usage: aims_ir.py SEED [smearing_width]
 #
 ################################################################################
 #
@@ -39,15 +39,17 @@
 #
 ################################################################################
 
+from __future__ import division
 import argparse
 from esc_lib import reduced2cart, ang2bohr, getElementZ, elements, remove_comments
-from numpy import array
+from numpy import array, amax, zeros, linspace, savetxt, pi, sqrt
 
 DEBUG=0
 
 parser = argparse.ArgumentParser(description="Construct a Molden input file from a FHI-aims calculation.")
 
 parser.add_argument('seed', help="Need the SEED.xyz file for reconstruction.")
+parser.add_argument('smearing_width', type=float, default=4.0, help="Lorentzian smearing width for the spectral output.")
 args = parser.parse_args()
 
 xyz = open(args.seed+".xyz", 'r')
@@ -135,3 +137,24 @@ for i in irintens:
   f.write("%10.5g\n" % i)
   
 f.close()
+
+# Write our spectrum. These settings are somewhat arbitrary but they'll do for now.
+emin = 0
+emax = amax(irfreq) + 500
+step = args.smearing_width / 10
+
+eaxis = linspace(emin, emax, (emax - emin) / step)
+iaxis = zeros(eaxis.shape)
+
+for i, frq in enumerate(irfreq):
+  for j, w in enumerate(eaxis):
+    smear_factor = (0.5/pi) * args.smearing_width / ((frq - w)**2 + (0.5 * args.smearing_width)**2)
+    iaxis[j] += irintens[i] * smear_factor
+
+# Divide out the intensity to make peak heights correspond to their actual IR intensities
+iaxis = 0.5 * iaxis * (pi * args.smearing_width)
+
+spectrum = zeros((len(eaxis), 2))
+spectrum[:,0] = eaxis
+spectrum[:,1] = iaxis
+savetxt(args.seed+".xy", spectrum)
