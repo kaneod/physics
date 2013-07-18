@@ -292,13 +292,13 @@ class AimsOutput:
     else:
       raise AIMSError("AimsOutput.readKSEigenvalues", "No eigenvalues present in output file - something is very wrong!")
       
-class AimsMomentumMatrix:
-  """ AimsMomentumMatrix class documentation
+class AimsMomentumMatrixHDF5:
+  """ AimsMomentumMatrixHDF5 class documentation
   
   This class is used to read the hdf5-formatted momentum matrix output available from 
   version 061913 of FHI-aims and onwards. 
   
-  Instantiate using the filename: my_aimsmommat = aims_lib.AimsMomentumMatrix("some_filename.h5")
+  Instantiate using the filename: my_aimsmommat = aims_lib.AimsMomentumMatrixHDF5("some_filename.h5")
   
   Why do we need this class? Because the momentum matrix elements are stored in a list that runs like:
   
@@ -328,10 +328,10 @@ class AimsMomentumMatrix:
   
   
   def __init__(self, filename):
-    """ Constructor for AimsMomentumMatrix, pass the filename/path to the .h5 file containing
+    """ Constructor for AimsMomentumMatrixHDF5, pass the filename/path to the .h5 file containing
     the matrix elements:
     
-    my_aimsmommat = aims_lib.AimsMomentumMatrix("some_filename.h5")
+    my_aimsmommat = aims_lib.AimsMomentumMatrixHDF5("some_filename.h5")
     
     """
     
@@ -380,6 +380,116 @@ class AimsMomentumMatrix:
           mat_elements[transition_idx,3] = -1.0 * self.matrix_elements[kx, ky, kz, total_idx, 3]
           mat_elements[transition_idx,4] = self.matrix_elements[kx, ky, kz, total_idx, 4]
           mat_elements[transition_idx,5] = -1.0 * self.matrix_elements[kx, ky, kz, total_idx, 5]
+          transition_idx += 1
+        # We only increment transition_idx if we actually are on a transition. 
+        # Otherwise just increment the total_idx.
+        total_idx += 1
+    
+    return mat_elements
+    
+class AimsMomentumMatrixText:
+  """ AimsMomentumMatrixText class documentation
+  
+  This class is used to read the momentum matrix output text files available from 
+  version 061913 of FHI-aims and onwards. 
+  
+  Instantiate using the filename: my_aimsmommat = aims_lib.AimsMomentumMatrixText("some_filename.dat")
+  
+  Why do we need this class? Because the momentum matrix elements are stored in a list that runs like:
+  
+  <1 | del | 2>
+  <1 | del | 3>
+  ...
+  <2 | del | 3>
+  ...
+  <3 | del | 4>
+  ...
+  
+  so it is like a handshake problem. If we are doing a spectrum calculation and, for
+  example, want ALL the transitions <i | del | j>, if i > 1 we need to find the transitions
+  <1 | del | i>, for example, and take their complex conjugate. So, this class
+  exists mainly to provide energy-ordered lists of momentum matrix elements for a given
+  transition.
+  
+  """
+  
+  nstates = 0
+  kpoint = None
+  kpoint_idx = 0
+  eigenvalues = None 
+  matrix_elements = None # Once initialized has shape [(nstates+1)*nstates/2, 6] 
+  
+  
+  def __init__(self, filename):
+    """ Constructor for AimsMomentumMatrixText, pass the filename/path to the .h5 file containing
+    the matrix elements:
+    
+    my_aimsmommat = aims_lib.AimsMomentumMatrixText("some_filename.dat")
+    
+    """
+    
+    f = open(filename, 'r')
+    text = f.readlines()
+    f.close()
+    
+    self.kpoint_idx = int(text[0].split()[2])
+    self.kpoint = array([float(x) for x in text[0].split()[4:7]])
+    
+    text = text[6:]
+    
+    self.nstates = int((-1 + sqrt(1 + 8.0 * len(text))) / 2)
+    self.eigenvalues = zeros((self.nstates))
+    self.matrix_elements = zeros((len(text), 6))
+    
+    transition_idx = 0
+    total_idx = 0
+
+    # First pass: read the whole file and just pull the matrix elements.
+    for i in range(len(text)):
+      bits = text[i].split()
+      self.matrix_elements[i,:] = array([float(x) for x in bits[4:10]])
+    
+    # Second pass: read only the first nstates-1 lines to pull all the eigenvalues.
+    for i in range(self.nstates - 1):
+      bits = text[i].split()
+      if i == 0:
+        self.eigenvalues[0] = float(bits[1])
+        self.eigenvalues[1] = float(bits[3])
+      else:
+        self.eigenvalues[i+1] = float(bits[3])
+    
+  def getElementsWithInitial(self, i):
+    """ mat_elements = getElementsWithInitial(i)
+    
+    Returns a [nstates - 1, 6]-shape matrix with all the elements <i| del |j> 
+    for j != i.
+    
+    Note that i is 0-based, not 1-based.
+    
+    """
+    
+    # The trick here is that  for all j > i we can just read the matrix elements
+    # directly from matrix_elements once we figure out an appropriate set of indices.
+    # For j < i, we need to hunt for the bits and take the complex conjugates.
+    
+    mat_elements = zeros((self.nstates - 1, 6))
+    transition_idx = 0
+    total_idx = 0
+        
+    for idx_i in range(0, self.nstates):
+      for idx_j in range(idx_i + 1, self.nstates):
+        if idx_i == i:
+          # Read directly 
+          mat_elements[transition_idx,:] = self.matrix_elements[total_idx, :]
+          transition_idx += 1
+        elif idx_j == i:
+          # Complex conjugates.
+          mat_elements[transition_idx,0] = self.matrix_elements[total_idx, 0]
+          mat_elements[transition_idx,1] = -1.0 * self.matrix_elements[total_idx, 1]
+          mat_elements[transition_idx,2] = self.matrix_elements[total_idx, 2]
+          mat_elements[transition_idx,3] = -1.0 * self.matrix_elements[total_idx, 3]
+          mat_elements[transition_idx,4] = self.matrix_elements[total_idx, 4]
+          mat_elements[transition_idx,5] = -1.0 * self.matrix_elements[total_idx, 5]
           transition_idx += 1
         # We only increment transition_idx if we actually are on a transition. 
         # Otherwise just increment the total_idx.
