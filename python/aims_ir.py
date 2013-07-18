@@ -119,6 +119,12 @@ for i, p in enumerate(ncpos[0]):
 f.write("[FREQ]\n")
 for frq in irfreq:
   f.write("%10.5g\n" % frq)
+  
+# Note: have to put intensities after frequencies to get avogadro to work properly
+# (otherwise it says there are no intensities in the file and sets them all to 1)
+f.write("[INT]\n")
+for i in irintens:
+  f.write("%10.5g\n" % i)
 
 f.write("[FR-COORD]\n")
 for s, p in zip(ncspec[0], ncpos[0]):
@@ -131,10 +137,6 @@ for i, alldx in enumerate(ncdx):
   for dx in alldx:
     dx = ang2bohr(dx)
     f.write("%10.5f\t%10.5f\t%10.5f\n" % (dx[0], dx[1], dx[2]))
-
-f.write("[INT]\n")
-for i in irintens:
-  f.write("%10.5g\n" % i)
   
 f.close()
 
