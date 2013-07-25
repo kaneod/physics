@@ -34,13 +34,18 @@
 
 from __future__ import division
 from numpy import *
+from numpy.linalg import *
 import h5py
+import libaims
 
 #-------------------------------------------------------------------------------
 #
 # Data section
 #
 #-------------------------------------------------------------------------------
+
+# Debugging switch - set to True to get debug printouts.
+DEBUG = True
 
 # Periodic table dictionary linking symbol to Z number.
 elements = { 1 : "H", 2 : "He", 3 : "Li", 4 : "Be", 5 : "B", 6 : "C", 7 : "N", \
@@ -62,6 +67,9 @@ elements = { 1 : "H", 2 : "He", 3 : "Li", 4 : "Be", 5 : "B", 6 : "C", 7 : "N", \
             104 : "Rf", 105 : "Db", 106 : "Sg", 107 : "Bh", 108 : "Hs", 109 : "Ds", \
             110 : "Ds", 111 : "Rg", 112 : "Uub", 113 : "Uut", 114 : "Uuq", 115 : "Uup", \
             116 : "Uuh", 117 : "Uus", 118 : "Uuo" }
+            
+# Conversion factors
+hartree2eV = 27.211396132
 
 #-------------------------------------------------------------------------------
 #
@@ -145,6 +153,7 @@ class AimsOutput:
   charge = 0.0
   nspins = 1
   nstates = 0
+  nelectrons = 0
   eigenvalues = None
   occupancies = None
   positions = None
@@ -165,6 +174,8 @@ class AimsOutput:
       self.readBasicModel()
       self.readGeometry()
       self.readKSEigenvalues()
+      self.computeNeutralLUMO()
+      self.setArtificialFermiLevel()
       f.close()
     else:
       raise AIMSError("AimsOutput.__init__", "File %s could not be opened for reading." % filename)
@@ -186,6 +197,8 @@ class AimsOutput:
       self.natoms = int(self.text[idx].split(":")[-1])
       idx = indexLine(self.text, "  | Number of spin channels")
       self.nspins = int(self.text[idx].split(":")[-1])    
+      idx = indexLine(self.text, "The structure contains")
+      self.nelectrons = float(self.text[idx].split()[9])
     except TypeError:
       raise AIMSError("AimsOutput.readBasicModel", "A fundamental parameter (nspecies, natoms or nspins) is missing from the file. It appears this Aims output is broken.")
     idx = indexLine(self.text, "Charge =")
@@ -195,9 +208,15 @@ class AimsOutput:
     else:
       # Assume 0 charge if not specified.
       self.charge = 0.0
-    # Read total number of KS states.
+    # Read total number of KS states. Need to be careful here, because the number
+    # of KS states requested will be bigger than the actual number if it exceeds
+    # the number of basis functions. We do a check.
     idx = indexLine(self.text, "| Number of Kohn-Sham states (occupied + empty):")
     self.nstates  = int(self.text[idx].split(":")[-1])
+    idx = indexLine(self.text, "| Maximum number of basis functions            :")
+    basis_size = int(self.text[idx].split(":")[-1])
+    if self.nstates > basis_size:
+      self.nstates = basis_size
   
   def readGeometry(self):
     """ readGeometry
@@ -262,6 +281,8 @@ class AimsOutput:
     """
     
     idx = indexLine(self.text, "Writing Kohn-Sham eigenvalues.", returnAll=True)
+    if DEBUG:
+      print "Kohn Sham line (1-based): ", idx[-1] + 1
     if idx is not None:
       # We only want the last place.
       idx = idx[-1]
@@ -280,18 +301,127 @@ class AimsOutput:
           self.eigenvalues[0,i - idx - 3 - offset] = float(bits[3])
       else:
         # Need to do twice, one for each spin.
+        if DEBUG:
+          print "First spin read from line (1-based): ", idx + 5 + offset + 1
+          print "Occupancy shape: ", self.occupancies.shape
+          print "Eigenvalues shape: ", self.eigenvalues.shape
         for i in range(idx + 5 + offset, idx + 5 + offset + self.nstates):
           bits = self.text[i].split()
           self.occupancies[0,i - idx - 5 - offset] = float(bits[1])
           self.eigenvalues[0,i - idx - 5 - offset] = float(bits[3])
-        idx += 5 + self.nstates
+        idx += 4 + offset + self.nstates
+        if DEBUG:
+          print "End of spin read line: ", idx + 1
+          print "Second spin read from line (1-based: ", idx + 5 + offset + 1
         for i in range(idx + 5 + offset, idx + 5 + offset + self.nstates):
           bits = self.text[i].split()
           self.occupancies[1,i - idx - 5 - offset] = float(bits[1])
-          self.eigenvalues[1,i - idx - 5 - offset] = float(bits[3])        
+          self.eigenvalues[1,i - idx - 5 - offset] = float(bits[3])     
     else:
       raise AIMSError("AimsOutput.readKSEigenvalues", "No eigenvalues present in output file - something is very wrong!")
-      
+  
+  def computeNeutralLUMO(self):
+    """ computeNeutralLUMO
+    
+    Using the occupancies and the system charge (if any), this function tries to calculate
+    the index of the lowest unoccupied KS state and whether it is partially or fully empty
+    when the system is NEUTRAL. The reason we do this is because if a core hole has been
+    included in the calculation, the reported occupancies reflect the excited system and
+    not the neutral system, but we need the neutral LUMO to determine an artificial fermi
+    level for molecular NEXAFS calculations. 
+    
+    Note that this only reads from the occupancies that are output in the main file and
+    typically this is just the gamma point. In a system with essentially flat bands, this
+    is fine, and in a system with a dense k-point mesh and dispersed bands it probably
+    won't matter either because there are plenty of states around the onset of the
+    unoccupied states so the spectral weighting at onset will not be substantially 
+    affected. YMMV.
+    
+    """
+    
+    # First figure out if the system has a core hole by checking for unoccupied states
+    # well below the "fermi" level.
+    if self.nspins == 1:
+      full_occupancy = 2.0
+    else:
+      full_occupancy = 1.0
+    
+    first_unoccupied = []
+    for i,occ in enumerate(self.occupancies[0,:]):
+      if occ < full_occupancy:
+        first_unoccupied.append(i)
+        break
+    if self.nspins == 2:
+      for i,occ in enumerate(self.occupancies[1,:]):
+        if occ < full_occupancy:
+          first_unoccupied.append(i)
+          break
+    
+    print "Found first unoccupied states at i = ", first_unoccupied
+    
+    # Now decide if these are core holes by looking if there are fully occupied states
+    # above.
+    self.hole_charge = zeros((self.nspins))
+    for i in range(self.nspins):
+      if full_occupancy in self.occupancies[i,first_unoccupied[i]+1:]:
+        self.hole_charge[i] = full_occupancy - self.occupancies[i,first_unoccupied[i]]
+    
+    print "Determined we have a hole charge of:", self.hole_charge
+    
+    # Now find the apparent LUMO (raw occupancies):
+    lumo = zeros((self.nspins))
+    nelectrons = zeros((self.nspins))
+    for i in range(self.nspins):
+      nelectrons[i] = sum(self.occupancies[i,:])
+      esum = 0.0
+      for j in range(self.occupancies.shape[1]):
+        if esum == nelectrons[i]:
+          lumo[i] = j
+          break
+        else:
+          esum += self.occupancies[i,j]
+    
+    print "Apparent LUMO for each spin channel is: ", lumo
+    
+    # If there is no hole charge, or the system charge matches the hole charge, then
+    # we are done. 
+    if sum(self.hole_charge) == 0.0 or sum(self.hole_charge) == self.charge:
+      self.lumo = int(amin(lumo))
+      return
+    
+    # If not, we have an at least partially neutral excitation. Separate cases for 
+    # spin polarized and not spin-polarized.
+    if self.nspins == 1:
+      if full_occupancy - self.occupancies[0,lumo[0]] == self.hole_charge[0]:
+        self.lumo = int(amin(lumo))
+        return
+      elif self.occupancies[0,lumo[0]] == 0.0:
+        self.lumo = int(lumo[0] - 1)
+        return
+      else:
+        print "(aims_lib.AimsOutput.computeNeutralLUMO) WARNING: System has a PARTIALLY neutral excitation - we cannot handle these at present. LUMO is probably wrong."
+        return
+    else:
+      if lumo[0] == lumo[1]:
+        self.lumo = int(lumo[0] - 1)
+        return
+      else:
+        self.lumo = int(amin(lumo))
+        return
+  
+  def setArtificialFermiLevel(self):
+    """ setArtificialFermilevel
+    
+    Use the neutral LUMO and LUMO - 1 (HOMO) eigenvalues to set a fermi level halfway 
+    in between. Note this is meaningless - it simply ensures that transitions from the
+    LUMO and up are included in any spectra generated.
+    
+    """
+    
+    e_lumo = self.eigenvalues[0,self.lumo]
+    e_homo = self.eigenvalues[0,self.lumo-1]
+    self.efermi = (e_lumo + e_homo) / 2
+    
 class AimsMomentumMatrixHDF5:
   """ AimsMomentumMatrixHDF5 class documentation
   
@@ -319,12 +449,12 @@ class AimsMomentumMatrixHDF5:
   """
   
   nstates = 0
-  nkx = 0
-  nky = 0
-  nkz = 0
-  kpoints = None # Once initialized has shape [nkx, nky, nkz, 4]
-  eigenvalues = None # Once initialized has shape [nkx, nky, nkz, nstates]
-  matrix_elements = None # Once initialized has shape [nkx, nky, nkz, (nstates+1)*nstates/2, 6] 
+  nkpts = 0
+  kpoints = None # Once initialized has shape [nkpts, 4]
+  eigenvalues = None # Once initialized has shape [nkpts, nstates]
+  matrix_elements = None # Once initialized has shape [nkpts, nstates, nstates - 1, 6]
+  
+  efermi = None
   
   
   def __init__(self, filename):
@@ -339,17 +469,38 @@ class AimsMomentumMatrixHDF5:
     
     # Copy all the relevant data into our object.
     self.nstates = f['E_bands'].shape[3]
-    self.nkx = f['k_points'].shape[0]
-    self.nky = f['k_points'].shape[1]
-    self.nkz = f['k_points'].shape[2]
-    self.kpoints = f['k_points'][:].copy()
-    self.eigenvalues = f['E_bands'][:].copy()
-    self.matrix_elements = f['Momentummatrix'][:].copy()
+    self.ntransitions = self.nstates - 1
+    nkx = f['k_points'].shape[0]
+    nky = f['k_points'].shape[1]
+    nkz = f['k_points'].shape[2]
+    self.nkpts = nkx * nky * nkz
+    self.efermi = hartree2eV * f['Fermi_energy'][0]   
     
+    # The shape of these is a bit silly so we reshape to go by kpt index rather than kpt.
+    kpoints = f['k_points'][:]
+    eigenvalues = hartree2eV * f['E_bands'][:] # Given in Hartree in the h5 file.
+    matrix_elements = f['Momentummatrix'][:]
+    
+    self.kpoints = zeros((self.nkpts, 3))
+    self.matrix_elements = zeros((self.nkpts, matrix_elements.shape[3], 6))
+    self.optical_matrix = zeros((self.nkpts, self.nstates, self.ntransitions, 6))
+    self.optical_transitions = zeros((self.nkpts, self.nstates, self.ntransitions))
+    self.eigenvalues = zeros((self.nkpts, self.nstates))
+    
+    for i in range(nkx):
+      for j in range(nky):
+        for k in range(nkz):
+          ik = int(kpoints[i,j,k,0])
+          self.kpoints[ik,:] = kpoints[i,j,k,1:]
+          self.eigenvalues[ik,:] = eigenvalues[i,j,k,:]
+          self.matrix_elements[ik,:,:] = matrix_elements[i,j,k,:,:]
+          for m in range(self.nstates):
+            self.optical_matrix[ik, m, :, :] = self.getElementsWithInitial(m, ik)
+            self.optical_transitions[ik, m, :] = self.getTransitionsWithInitial(m, ik)
     f.close()
     
-  def getElementsWithInitial(self, i, kx, ky, kz):
-    """ mat_elements = getElementsWithInitial(i, kx, ky, kz)
+  def getElementsWithInitial(self, i, ik):
+    """ mat_elements = getElementsWithInitial(i, ik)
     
     Returns a [nstates - 1, 6]-shape matrix with all the elements <i| del |j> 
     for j != i and the specified k-point.
@@ -370,23 +521,42 @@ class AimsMomentumMatrixHDF5:
       for idx_j in range(idx_i + 1, self.nstates):
         if idx_i == i:
           # Read directly 
-          mat_elements[transition_idx,:] = self.matrix_elements[kx, ky, kz, total_idx, :]
+          mat_elements[transition_idx,:] = self.matrix_elements[ik, total_idx, :]
           transition_idx += 1
         elif idx_j == i:
           # Complex conjugates.
-          mat_elements[transition_idx,0] = self.matrix_elements[kx, ky, kz, total_idx, 0]
-          mat_elements[transition_idx,1] = -1.0 * self.matrix_elements[kx, ky, kz, total_idx, 1]
-          mat_elements[transition_idx,2] = self.matrix_elements[kx, ky, kz, total_idx, 2]
-          mat_elements[transition_idx,3] = -1.0 * self.matrix_elements[kx, ky, kz, total_idx, 3]
-          mat_elements[transition_idx,4] = self.matrix_elements[kx, ky, kz, total_idx, 4]
-          mat_elements[transition_idx,5] = -1.0 * self.matrix_elements[kx, ky, kz, total_idx, 5]
+          mat_elements[transition_idx,0] = self.matrix_elements[ik, total_idx, 0]
+          mat_elements[transition_idx,1] = -1.0 * self.matrix_elements[ik, total_idx, 1]
+          mat_elements[transition_idx,2] = self.matrix_elements[ik, total_idx, 2]
+          mat_elements[transition_idx,3] = -1.0 * self.matrix_elements[ik, total_idx, 3]
+          mat_elements[transition_idx,4] = self.matrix_elements[ik, total_idx, 4]
+          mat_elements[transition_idx,5] = -1.0 * self.matrix_elements[ik, total_idx, 5]
           transition_idx += 1
         # We only increment transition_idx if we actually are on a transition. 
         # Otherwise just increment the total_idx.
         total_idx += 1
     
     return mat_elements
+  
+  def getTransitionsWithInitial(self, i, ik):
+    """ transitions = getTransitionsWithInitial(i, ik)
     
+    Returns a [nstates - 1]-shape matrix with the transition energies Ej - Ei for each
+    j != i for a single k-point. Note that this uses Ei FROM THE GIVEN K.
+    
+    Note that i is 0-based, not 1-based.
+    
+    """ 
+    
+    transitions = []
+    
+    for j in range(self.eigenvalues.shape[1]):
+      if j != i:
+        transitions.append(self.eigenvalues[ik, j] - self.eigenvalues[ik, i])
+    
+    return array(transitions) 
+           
+
 class AimsMomentumMatrixText:
   """ AimsMomentumMatrixText class documentation
   
@@ -411,13 +581,19 @@ class AimsMomentumMatrixText:
   exists mainly to provide energy-ordered lists of momentum matrix elements for a given
   transition.
   
+  The text version (as opposed to the HDF5 version) is slightly different in that it
+  only has one kpoint. However, it retains identical array structures to the HDF5 version
+  for compatibility.
+  
   """
   
   nstates = 0
-  kpoint = None
-  kpoint_idx = 0
-  eigenvalues = None 
-  matrix_elements = None # Once initialized has shape [(nstates+1)*nstates/2, 6] 
+  nkpts = 1
+  #kpoints = None # Once initialized has shape [nkpts, 4]
+  eigenvalues = None # Once initialized has shape [1, nstates]
+  matrix_elements = None # Once initialized has shape [1, nstates, nstates - 1, 6]
+  
+  efermi = None
   
   
   def __init__(self, filename):
@@ -432,14 +608,17 @@ class AimsMomentumMatrixText:
     text = f.readlines()
     f.close()
     
-    self.kpoint_idx = int(text[0].split()[2])
-    self.kpoint = array([float(x) for x in text[0].split()[4:7]])
+    #self.kpoint_idx = int(text[0].split()[2])
+    #self.kpoint = array([float(x) for x in text[0].split()[4:7]])
     
     text = text[6:]
     
     self.nstates = int((-1 + sqrt(1 + 8.0 * len(text))) / 2)
-    self.eigenvalues = zeros((self.nstates))
+    self.ntrans = self.nstates - 1
+    self.eigenvalues = zeros((1, self.nstates))
     self.matrix_elements = zeros((len(text), 6))
+    self.optical_matrix = zeros((1, self.nstates, self.ntrans, 6))
+    self.optical_transitions = zeros((1, self.nstates, self.ntrans))
     
     transition_idx = 0
     total_idx = 0
@@ -453,10 +632,15 @@ class AimsMomentumMatrixText:
     for i in range(self.nstates - 1):
       bits = text[i].split()
       if i == 0:
-        self.eigenvalues[0] = float(bits[1])
-        self.eigenvalues[1] = float(bits[3])
+        self.eigenvalues[0,0] = float(bits[1])
+        self.eigenvalues[0,1] = float(bits[3])
       else:
-        self.eigenvalues[i+1] = float(bits[3])
+        self.eigenvalues[0,i+1] = float(bits[3])
+    
+    # Third pass: create the optical_matrix and optical_transitions arrays.
+    for m in range(self.nstates):
+      self.optical_matrix[0, m, :, :] = self.getElementsWithInitial(m)
+      self.optical_transitions[0, m, :] = self.getTransitionsWithInitial(m)
     
   def getElementsWithInitial(self, i):
     """ mat_elements = getElementsWithInitial(i)
@@ -496,3 +680,166 @@ class AimsMomentumMatrixText:
         total_idx += 1
     
     return mat_elements
+
+  def getTransitionsWithInitial(self, i):
+    """ transitions = getTransitionsWithInitial(i)
+    
+    Returns a [nstates - 1]-shape matrix with the transition energies Ej - Ei for each
+    j != i.
+    
+    Note that i is 0-based, not 1-based.
+    
+    """ 
+    
+    transitions = []
+    for j in range(self.eigenvalues.shape[1]):
+      if j != i:
+        transitions.append(self.eigenvalues[0,j] - self.eigenvalues[0,i])
+    
+    return array(transitions)
+  
+class AimsNEXAFS:
+  """ AimsNEXAFS class documentation
+  
+  The purpose of this class is to generate NEXAFS spectra from FHI-aims calculations. It
+  can use a variety of inputs that can give increasingly more-useful output. The default 
+  constructor:
+  
+  my_spec = aims_lib.AimsNEXAFS(filename)
+  
+  assumes that the passed filename points to a HDF5 file and will use a AimsMomentumMatrixHDF5
+  object to generate the spectrum. In that case, the system fermi level is used to figure
+  out where the empty states start.
+  
+  If you specify both a .dat file and an output file:
+  
+  my_spec = aims_lib.AimsNEXAFS(filename, HDF5=False, outputFile=outFilename)
+  
+  a AimsMomentumMatrixText object will be used along with an AimsOutput object. These
+  two are needed together because in this case figuring out where the unoccupied states
+  start matters in a more precise way.
+  
+  """
+  
+  # These variables are set within the constructors.
+  mommatrix = None
+  momhdf5 = None
+  output = None
+  
+  # These variables are set from generateSpectrum()
+  w =  None # This is the photon energy array itself, shape (num_points)
+  spectral_cmpts = None # Individual components of the spectrum
+  
+  # Set all the following before calling generateSpectrum()
+  # If unset, default values are used after printing a warning.
+  w_start = None
+  w_end = None
+  num_points = None
+  
+  # Smearing factors
+  linear_smearing = None
+  lorentzian_smearing = None
+  gaussian_smearing = None
+  
+  def __init__(self, filename, HDF5=True, outputFile=None):
+    """ my_spec = aims_lib.AimsNEXAFS(filename, HDF5=True, outputFile=None)
+    
+    Constructor for AimsNEXAFS object.
+    
+    """
+    
+    # Instantiate the mommatrix object using the file.
+    if HDF5:
+      self.mommatrix = AimsMomentumMatrixHDF5(filename)
+      self.momhdf5 = True
+    else:
+      if outputFile:
+        self.mommatrix = AimsMomentumMatrixText(filename)
+        self.momhdf5 = False
+        self.output = AimsOutput(outputFile)
+        self.mommatrix.efermi = self.output.efermi
+      else:
+        raise AimsERROR("aims_lib.AimsNEXAFS.__init__", "If using a non-HDF5 momentum matrix, a FHI-aims output file is also required.")    
+   
+  def generateSpectrum(self, i_core):
+    """ worked = AimsNEXAFS.generateSpectrum(i_core)
+    
+    Populates the spectral_cmpts matrix using the momentum matrix elements. Note that
+    we DO NOT SMEAR here - we set the smearing to half the step size as explained in
+    the libpytep code. Smearing has to happen later on.
+    
+    i_core is the KS index of the state used as the core level.
+    
+    """
+    
+    # First job is to set up the energy spectrum. If w_start and w_end haven't
+    # been specified, we run from -5 eV below the Fermi level up to 5 eV past the highest 
+    # transition energy which is amax(eigenvalues) - eigenvalues[icore] + 5.
+    
+    # We make the (reasonable) assumption here that the core state i_core is not 
+    # dispersed with k, so any k choice will do if HDF5 input is used.
+    
+    if not self.w_start:
+      self.w_start = self.mommatrix.efermi - self.mommatrix.eigenvalues[0,i_core] - 5.0
+    if not self.w_end:
+      maxe = amax(self.mommatrix.eigenvalues)
+      self.w_end = maxe - self.mommatrix.eigenvalues[0,i_core] + 5.0
+    
+    if not self.num_points:
+      self.num_points = 2000
+      
+    self.w = linspace(self.w_start, self.w_end, self.num_points)
+    self.spectral_cmpts = zeros((self.num_points, 6))
+
+    # Zero the spectral_cmpts matrix.
+    self.spectral_cmpts = zeros((self.num_points, 6), 'f')
+    
+    # Due to the arrays being set up the same in both AimsMomentumMatrixHDF5 and
+    # AimsMomentumMatrixText, we can use the same function call to libaims here to 
+    # generate the spectral components. However, note that the efermi level passed here
+    # is ARTIFICIAL for the text case (it is computed by the AimsMomentumMatrixText
+    # object and not from FHI-aims itself. 
+    self.spectral_cmpts = libaims.spectroscopy.generate_spectrum(self.mommatrix.optical_matrix, \
+                                                self.mommatrix.optical_transitions, \
+                                                self.mommatrix.eigenvalues, \
+                                                self.w, self.mommatrix.efermi, i_core+1)
+                                                
+  def experimentalSpectrum(self, polarization_vector):
+    """ experimentalSpectrum
+    
+    Constructs a single spectrum (shape [num_points]) for the specified polarization
+    vector and using the smearing parameters of the AimsNEXAFS object.
+        
+    """              
+    
+    # Set some defaults if they aren't set.
+    if not self.linear_smearing:
+      self.linear_smearing = 0.001
+      
+    if not self.lorentzian_smearing:
+      self.lorentzian_smearing = 0.1
+      
+    if not self.gaussian_smearing:
+      self.gaussian_smearing = 0.1
+      
+    # Normalize the polarization vector.
+    p = array(polarization_vector) / norm(array(polarization_vector))
+    
+    # Make sure the spectral components have actually been generated!
+    if self.spectral_cmpts is None:
+      print "(aims_lib.AimsNEXAFS.experimentalSpectrum) ERROR - you have not yet generated any spectral components. Call generateSpectrum first."
+      return
+      
+    self.spectrum = p[0]**2 * self.spectral_cmpts[:,0] + \
+                    p[1]**2 * self.spectral_cmpts[:,1] + \
+                    p[2]**2 * self.spectral_cmpts[:,2] + \
+                    p[0]*p[1] * self.spectral_cmpts[:,3] + \
+                    p[0]*p[2] * self.spectral_cmpts[:,4] + \
+                    p[1]*p[2] * self.spectral_cmpts[:,5]
+    
+    self.spectrum = libaims.utilities.lorentzian_linear_convolute(self.w, \
+                                      self.spectrum, self.lorentzian_smearing, \
+                                      self.linear_smearing)
+    
+    self.spectrum = libaims.utilities.gaussian_convolute(self.w, self.spectrum, \
+                                      self.gaussian_smearing)
