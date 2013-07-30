@@ -42,7 +42,7 @@ DEBUG=0
 parser = argparse.ArgumentParser(description="Convert .pdb to FHI-aims geometry.in")
 
 parser.add_argument('inputfile', help="Input .pdb file.")
-parser.add_argument('-o,--output', type=float, default="geometry.in", help="Choose a name for your output file.")
+parser.add_argument('-o', '--output', default="geometry.in", help="choose a name for your output file.")
 args = parser.parse_args()
 
 pdb = el.Atoms(args.inputfile, "pdb")

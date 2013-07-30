@@ -49,7 +49,7 @@ DEBUG=0
 parser = argparse.ArgumentParser(description="Construct a Molden input file from a FHI-aims calculation.")
 
 parser.add_argument('seed', help="Need the SEED.xyz file for reconstruction.")
-parser.add_argument('-s,--smearing', type=float, default=4.0, help="Lorentzian smearing width for the spectral output.")
+parser.add_argument('-s', '--smearing', type=float, default=4.0, help="Lorentzian smearing width for the spectral output.")
 args = parser.parse_args()
 
 xyz = open(args.seed+".xyz", 'r')
