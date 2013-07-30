@@ -95,8 +95,7 @@ def indexLine(text, substring, returnAll=False):
     else:
       return indices
   else:
-    # The substring might not occur at all, in which case we return an empty
-    # list to be consistent with the returnAll=True case.
+    # The substring might not occur at all, in which case we return None.
     if len(indices) == 0:
       return None
     else:
