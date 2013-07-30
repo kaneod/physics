@@ -52,9 +52,27 @@ DEBUG=1
 
 # Element dictionaries
 
-elements = { 1 : "H", 2 : "He", 3 : "Li",  4 : "Be", 5 : "B", 6 : "C", 7 : "N" , 8 : "O", 9 : "F", 29 : "Cu", 14 : "Si" , 13 : "Al", 16: "S", 83 : "Bi"}
+elements = { 1 : "H", 2 : "He", 3 : "Li", 4 : "Be", 5 : "B", 6 : "C", 7 : "N", \
+            8 : "O", 9 : "F", 10 : "Ne", 11 : "Na", 12 : "Mg", 13 : "Al", 14 : "Si", \
+            15 : "P", 16 : "S", 17 : "Cl", 18 : "Ar", 19 : "K", 20 : "Ca", 21 : "Sc", \
+            22 : "Ti", 23 : "V", 24 : "Cr", 25 : "Mn", 26 : "Fe", 27 : "Co", 28 : "Ni", \
+            29 : "Cu", 30 : "Zn", 31 : "Ga", 32 : "Ge", 33 : "As", 34 : "Se", \
+            35 : "Br", 36 : "Kr", 37 : "Rb", 38 : "Sr", 39 : "Y", 40 : "Zr", 41 : "Nb", \
+            42 : "Mo", 43 : "Tc", 44 : "Ru", 45 : "Rh", 46 : "Pd", 47 : "Ag", \
+            48 : "Cd", 49 : "In", 50 : "Sn", 51 : "Sb", 52 : "Te", 53 : "I", 54 : "Xe", \
+            55 : "Cs", 56 : "Ba", 57 : "La", 58 : "Ce", 59 : "Pr", 60 : "Nd", \
+            61 : "Pm", 62 : "Sm", 63 : "Eu", 64 : "Gd", 65 : "Tb", 66 : "Dy", \
+            67 : "Ho", 68 : "Er", 69 : "Tm", 70 : "Yb", 71 : "Lu", \
+            72 : "Hf", 73 : "Ta", 74 : "W", 75 : "Re", 76 : "Os", 77 : "Ir", 78 : "Pt", \
+            79 : "Au", 80 : "Hg", 81 : "Tl", 82 : "Pb", 83 : "Bi", 84 : "Po", \
+            85 : "At", 86 : "Rn", 87 : "Fr", 88 : "Ra", 89 : "Ac", 90 : "Th", \
+            91 : "Pa", 92 : "U", 93 : "Np", 94 : "Pu", 95 : "Am", 96 : "Cm", 97 : "Bk", \
+            98 : "Cf", 99 : "Es", 100 : "Fm", 101 : "Md", 102 : "No", 103 : "Lr", \
+            104 : "Rf", 105 : "Db", 106 : "Sg", 107 : "Bh", 108 : "Hs", 109 : "Ds", \
+            110 : "Ds", 111 : "Rg", 112 : "Uub", 113 : "Uut", 114 : "Uuq", 115 : "Uup", \
+            116 : "Uuh", 117 : "Uus", 118 : "Uuo" }
+            
 xsf_keywords = ["ANIMSTEPS", "CRYSTAL", "ATOMS", "PRIMVEC", "PRIMCOORD"]
-bond_lengths = {"CH" : 2.06, "CC" : 2.91, "NC" : 2.78, "NH" : 1.91, "HH" : 2.27}
 
 def getElementZ(elstr):
     """ Z = getElementZ(elstr)
@@ -92,6 +110,7 @@ def substringInList(substring, list):
   
   return False
   
+  
 def substringPositionsInList(substring, list):
   """ line_indices = substringPositionsInList(substring, list)
   
@@ -109,7 +128,33 @@ def substringPositionsInList(substring, list):
     return line_indices
   else:
     return False
+
+def indexLine(text, substring, returnAll=False):
+  """ index = indexLine(text, substring, returnAll=False)
   
+  Returns the index of the line where a substring first occurs
+  in a list of strings. If returnAll=True, returns a list of indices
+  of all occurrences. 
+  
+  Note we return None if the string is not found at all.
+  
+  This is a function that combines the properties of substringInList and 
+  substringPositionsInList (the other two are deprecated).
+  
+  """
+  
+  indices = [i for i,line in enumerate(text) if substring in line]
+  if returnAll:
+    if len(indices) == 0:
+      return None
+    else:
+      return indices
+  else:
+    # The substring might not occur at all, in which case we return None.
+    if len(indices) == 0:
+      return None
+    else:
+      return indices[0]
   
 def integral_smoothing(data, period, pbc=False):
   """ smooth_data = integral_smoothing(data, period)
@@ -1103,7 +1148,7 @@ def write_xsf(filename, positions, species, lattice=None, letter_spec=True):
     if DEBUG: print len(positions)
     # Convert everything back to angstroms for XSF
     apos = bohr2ang(positions)
-    if lattice is not None:
+    if lattice is not None and lattice != []:
         alat = bohr2ang(lattice)
     else:
         alat = None
@@ -1125,7 +1170,7 @@ def write_xsf(filename, positions, species, lattice=None, letter_spec=True):
     for i in range(len(apos)):
         if alat is None:
             f.write("ATOMS %d\n" % (i+1))
-        if alat is not None and len(alat) > 1:
+        elif alat is not None and len(alat) > 1:
             f.write("PRIMVEC %d\n" % (i+1))
             f.write("    %g    %g    %g\n" % (alat[i][0][0], alat[i][0][1], alat[i][0][2]))
             f.write("    %g    %g    %g\n" % (alat[i][1][0], alat[i][1][1], alat[i][1][2]))
@@ -1599,19 +1644,27 @@ class Atoms:
         
         "XSF" : XCrysden Structure Format, can also be animated axsf.
         
-        "abinit" : Abinit input file.
+        "abinit,input" : Abinit input file.
         
-        "abi_density" : Abinit _DEN file.
+        "abinit,density" : Abinit _DEN file.
         
-        "elk" : Elk input file.
+        "abinit,wfk" : _WFK file from Abinit.
         
-        "castep" : CASTEP .cell file.
+        "elk,input" : Elk input file.
         
-        "NetCDF" : Abinit NetCDF output. Note: this importer is not very clever
+        "castep,cell" : CASTEP .cell file.
+        
+        "aims,geometry" : geometry.in file from FHI-aims
+        
+        "aims,output" : Output file from FHI-aims.
+        
+        "abinit,NetCDF" : Abinit NetCDF output. Note: this importer is not very clever
         and will put in default values for the species if they cannot be found -
         default is all atoms are carbon.
         
         "ETSF" : Read from ETSF-formatted NetCDF output.
+        
+        "pdb" : Protein Data Bank format.
         
         """
         
@@ -1637,10 +1690,109 @@ class Atoms:
           self.loadFromAimsGeometry(filename)
         elif filetype == "aims,output":
           self.loadFromAimsOutput(filename)
+        elif filetype == "pdb":
+          self.loadFromPDB(filename)
         else:
           print "(esc_lib.Atoms.__init__) ERROR: File type %s not handled at present." % filetype
           return None
   
+    def loadFromPDB(self, filename):
+      """ atoms = Atoms.loadFromPDB(filename)
+      
+      Internal: grabs a molecule or crystal from a .pdb file. Not very clever but good
+      enough. Anything that comes up as ERROR will return None.
+      
+      """
+      
+      self.clean()
+      f = open(filename, 'r')
+      data = f.readlines()
+      f.close()
+      
+      # We are only interested in the following lines: anything that starts with "ATOM",
+      # "CRYST1", "HETATM", "NUMMDL", "MODEL" and "ENDMDL".
+      crys = indexLine(data, "CRYST1")
+      atoms = indexLine(data, "ATOM", returnAll=True)
+      hetatms = indexLine(data, "HETATM", returnAll=True)
+      nummdl_idx = indexLine(data, "NUMMDL")
+      models = indexLine(data, "MODEL", returnAll=True)
+      endmdls = indexLine(data, "ENDMDL", returnAll=True) 
+      num_models = None # will set this shortly if necessary
+      
+      # Basic sanity checks.
+      # 1. Check we actually have atoms.
+      if atoms is None and hetatms is None:
+        print "(Atoms.loadFromPDB) ERROR: PDB file contains no ATOM or HETATM statements - there are no atoms specified!"
+        return None
+      # 2. If NUMMDL is greater than 1 - need to make sure there
+      # are the correct number of blocks and ATOM/HETATM statements.
+      if nummdl_idx is not None:
+        num_models = int(data[nummdl_idx].split()[1])
+        if num_models > 1:
+          if len(models) != len(endmdls):
+            print "(Atoms.loadFromPDB) ERROR: PDB file is incomplete - number of MODEL and ENDMDL statements do not match."
+            return None
+          elif len(models) != num_models:
+            print "(Atoms.loadFromPDB) ERROR: PDB file is incomplete - number of MODEL blocks is not equal to NUMMDL."
+            return None
+          # Check that the number of ATOM/HETATM lines is a multiple of NUMMDL.
+          combined_atoms = len(atoms) + len(hetatms)
+          if combined_atoms % num_models != 0:
+            print "(Atoms.loadFromPDB) ERROR: Number of atoms is not a multiple of NUMMDL - there are missing atoms in the model sequence."
+            return None
+            
+      # If we have a crystal lattice specified, convert it to vectors. Note that since
+      # in a PDB the crystal is specified in ABC format (three lengths, three angles)
+      # the conversion is not unique and needs to be done according to a standard. Here,
+      # the CASTEP standard is used: "a" goes along x, b is in the xy plane and the whole
+      # thing must have a positive cell volume with a.(bxc) [this fixes c].
+      if crys is not None:
+        lvec = []
+        lengths = array([float(x) for x in data[crys].split()[1:4]])
+        angles = array([float(x) for x in data[crys].split()[4:7]])
+        angles *= pi/180.0
+        lvec.append(array([lengths[0], 0.0, 0.0])) # "a"
+        lvec.append(array([lengths[1] * cos(angles[2]), lengths[1] * sin(angles[2]), 0.0]))
+        ca = lengths[2] * cos(angles[1])
+        cb = lengths[2] * (cos(angles[0]) - cos(angles[1]) * cos(angles[2])) / sin(angles[2])
+        cc = sqrt(lengths[2] ** 2 - ca ** 2 - cb ** 2)
+        lvec.append(array([ca, cb, cc]))
+        self.is_crystal = True
+        if num_models is not None:
+          self.lattice.append(num_models * ang2bohr(lvec))
+        else:
+          self.lattice.append(ang2bohr(lvec))
+      
+      # Read every ATOM/HETATM for positions and species. Note that we combine the two
+      # index lists and then sort, so that it doesn't matter whether there is exclusively
+      # ATOM, exclusively HETATM or mixed in any combination. The result is then chopped
+      # by the number of models in order to get the frames of animation.
+      if atoms is not None and hetatms is not None:
+        all_atoms = atoms + hetatms
+      elif hetatms is not None:
+        all_atoms = hetatms
+      elif atoms is not None:
+        all_atoms = atoms
+      # The else case is dealt with earlier.
+      
+      all_atoms.sort()
+      pos = []
+      spec = []
+      for i in all_atoms:
+        at = data[i]
+        print "Atom: ", i, at[30:54], getElementZ(at[76:78].strip())
+        pos.append(array([float(x) for x in at[30:54].split()]))
+        spec.append(getElementZ(at[76:78].strip()))
+      
+      if num_models is not None:
+        chunksize = int(float(len(pos)) / num_models)
+        for j in range(num_models):
+          self.positions.append(pos[j*chunksize:(j+1)*chunksize])
+          self.species.append(spec[j*chunksize:(j+1)*chunksize])
+      else:
+        self.positions.append(pos)
+        self.species.append(spec)
+      
     def loadFromAimsOutput(self, filename):
       """ atoms = Atoms.loadFromAimsOutput(filename)
       
