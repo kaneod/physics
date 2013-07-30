@@ -1780,8 +1780,7 @@ class Atoms:
       spec = []
       for i in all_atoms:
         at = data[i]
-        print "Atom: ", i, at[30:54], getElementZ(at[76:78].strip())
-        pos.append(array([float(x) for x in at[30:54].split()]))
+        pos.append(ang2bohr(array([float(x) for x in at[30:54].split()])))
         spec.append(getElementZ(at[76:78].strip()))
       
       if num_models is not None:
