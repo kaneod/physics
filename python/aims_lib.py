@@ -760,14 +760,18 @@ class AimsNEXAFS:
       else:
         raise AimsERROR("aims_lib.AimsNEXAFS.__init__", "If using a non-HDF5 momentum matrix, a FHI-aims output file is also required.")    
    
-  def generateSpectrum(self, i_core):
-    """ worked = AimsNEXAFS.generateSpectrum(i_core)
+  def generateSpectrum(self, i_core, override_w=True):
+    """ worked = AimsNEXAFS.generateSpectrum(i_core, override_w=True)
     
     Populates the spectral_cmpts matrix using the momentum matrix elements. Note that
     we DO NOT SMEAR here - we set the smearing to half the step size as explained in
     the libpytep code. Smearing has to happen later on.
     
     i_core is the KS index of the state used as the core level.
+    
+    By default (override_w=True), the w_start and w_end parameters are overwritten
+    by new automatically generated values. If override_w=False, the existing ones are
+    left in place if they exist at all.
     
     """
     
@@ -778,9 +782,9 @@ class AimsNEXAFS:
     # We make the (reasonable) assumption here that the core state i_core is not 
     # dispersed with k, so any k choice will do if HDF5 input is used.
     
-    if not self.w_start:
+    if override_w or (not self.w_start):
       self.w_start = self.mommatrix.efermi - self.mommatrix.eigenvalues[0,i_core] - 5.0
-    if not self.w_end:
+    if override_w or (not self.w_end):
       maxe = amax(self.mommatrix.eigenvalues)
       self.w_end = maxe - self.mommatrix.eigenvalues[0,i_core] + 5.0
     
