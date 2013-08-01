@@ -332,6 +332,7 @@ class AimsOutput:
     
     self.optical_transitions = zeros((1, self.nspins, self.nstates, self.nstates - 1))
     self.direct_transitions = zeros((1, self.nspins, self.nstates, self.nstates - 1))
+    self.transition_threshold = zeros((1, self.nspins, self.nstates))
     
     if self.nspins == 1:
       for m in range(self.nstates):
@@ -340,6 +341,7 @@ class AimsOutput:
           if j != m:
             transitions.append(self.eigenvalues[0,j] - self.eigenvalues[0,m])
         self.optical_transitions[0,0,m,:] = array(transitions)
+        self.transition_threshold[0,0,m] = self.efermi - self.eigenvalues[0,m]
       self.direct_transitions = self.optical_transitions.copy()
     else:
       for s in range(self.nspins):
@@ -354,6 +356,7 @@ class AimsOutput:
               transitions_direct.append(self.eigenvalues[s,j] - self.eigenvalues[s,m])
           self.optical_transitions[0,s,m,:] = array(transitions_optical)
           self.direct_transitions[0,s,m,:] = array(transitions_direct)
+          self.transition_threshold[0,s,m] = self.efermi - self.eigenvalues[s,m]
       
   def computeNeutralLUMO(self):
     """ computeNeutralLUMO
