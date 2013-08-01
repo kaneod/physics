@@ -175,6 +175,7 @@ class AimsOutput:
       self.readKSEigenvalues()
       self.computeNeutralLUMO()
       self.setArtificialFermiLevel()
+      self.computeTransitions()
       f.close()
     else:
       raise AIMSError("AimsOutput.__init__", "File %s could not be opened for reading." % filename)
@@ -319,6 +320,41 @@ class AimsOutput:
     else:
       raise AIMSError("AimsOutput.readKSEigenvalues", "No eigenvalues present in output file - something is very wrong!")
   
+  def computeTransitions(self):
+    """ computeTransitions
+    
+    Calculates all possible optical (spin-polarized) and direct transitions between KS
+    eigenvalues. If nspins=1 the optical and direct transitions are the same. This only
+    works for the k-point given in the output file (and hence, generally only useful for
+    molecules).
+    
+    """
+    
+    self.optical_transitions = zeros((1, self.nspins, self.nstates, self.nstates - 1))
+    self.direct_transitions = zeros((1, self.nspins, self.nstates, self.nstates - 1))
+    
+    if self.nspins == 1:
+      for m in range(self.nstates):
+        transitions = []
+        for j in range(self.eigenvalues.shape[1]):
+          if j != m:
+            transitions.append(self.eigenvalues[0,j] - self.eigenvalues[0,m])
+        self.optical_transitions[0,0,m,:] = array(transitions)
+      self.direct_transitions = self.optical_transitions.copy()
+    else:
+      for s in range(self.nspins):
+        for m in range(self.nstates):
+          transitions_optical = []
+          transitions_direct = []
+          for j in range(self.eigenvalues.shape[1]):
+            if j != m:
+              # Optical transition: take Ej from the opposite spin eigenvalues to Em
+              transitions_optical.append(self.eigenvalues[(s+1)%2,j] - self.eigenvalues[s,m])
+              # Direct transition: take Ej from the same spin eigenvalues as Em
+              transitions_direct.append(self.eigenvalues[s,j] - self.eigenvalues[s,m])
+          self.optical_transitions[0,s,m,:] = array(transitions_optical)
+          self.direct_transitions[0,s,m,:] = array(transitions_direct)
+      
   def computeNeutralLUMO(self):
     """ computeNeutralLUMO
     
