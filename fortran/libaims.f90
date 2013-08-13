@@ -205,7 +205,7 @@ module spectroscopy
   
   contains
   
-  subroutine generate_spectrum(optmat, opttrans, eig, w, spectrum, efermi, i_core, &
+  subroutine generate_spectrum(optmat, opttrans, ecore, w, spectrum, efermi, i_core, &
   &                             nkpts, nstates, ntrans, npts)
     !-------------------------------------------------------------------------------------
     !
@@ -216,7 +216,7 @@ module spectroscopy
     ! This function computes sum_k sum_j M_ijku^2 delta(Ejk - Eik - w) for each of the 6 
     ! spectral components M_ijk1...M_ijk6 for a fixed starting energy level Eik indexed
     ! by i_core. The matrix elements are contained in the input optmat, the transitions
-    ! Ejk - Eik are contained in opttrans, eig is an array of the eigenvalues, w is the
+    ! Ejk - Eik are contained in opttrans, ecore is the core level eigenvalue, w is the
     ! array of spectrum points, spectrum is the intended output array, efermi is
     ! the system fermi level used to determine if a transition is included or
     ! not and the other inputs are dimensions.
@@ -226,7 +226,7 @@ module spectroscopy
     integer, intent(in) :: i_core, nkpts, nstates, ntrans, npts
     real(kind=dp), intent(in) :: optmat(nkpts, nstates, ntrans, 6)
     real(kind=dp), intent(in) :: opttrans(nkpts, nstates, ntrans)
-    real(kind=dp), intent(in) :: eig(nkpts, nstates)
+    real(kind=dp), intent(in) :: ecore
     real(kind=dp), intent(in) :: efermi
     real(kind=dp), intent(in) :: w(npts)
     real(kind=dp), intent(out) :: spectrum(npts, 6)
@@ -243,19 +243,30 @@ module spectroscopy
       do im=1,ntrans
         !print *, "Inside m = ", im
         ! Simple cutoff test - eventually might add some kind of Fermi function here.
-        print *, opttrans(ik, i_core, im), efermi - eig(ik, i_core)
-        if (opttrans(ik,i_core,im).gt.(efermi - eig(ik,i_core))) then
+        print *, opttrans(ik, i_core, im), efermi - ecore
+        if (opttrans(ik,i_core,im).gt.(efermi - ecore)) then
           f_mk = 1.0d0
-          matcmpts(1) = optmat(ik, i_core, im, 1)**2 + optmat(ik, i_core, im, 2)**2
-          matcmpts(2) = optmat(ik, i_core, im, 3)**2 + optmat(ik, i_core, im, 4)**2
-          matcmpts(3) = optmat(ik, i_core, im, 5)**2 + optmat(ik, i_core, im, 6)**2
-          matcmpts(4) = 2.0d0 * (optmat(ik, i_core, im, 1) * optmat(ik, i_core, im, 3) + &
-          &               optmat(ik, i_core, im, 2) * optmat(ik, i_core, im, 4))
-          matcmpts(5) = 2.0d0 * (optmat(ik, i_core, im, 1) * optmat(ik, i_core, im, 5) + &
-          &               optmat(ik, i_core, im, 2) * optmat(ik, i_core, im, 6))
-          matcmpts(6) = 2.0d0 * (optmat(ik, i_core, im, 3) * optmat(ik, i_core, im, 5) + &
-          &               optmat(ik, i_core, im, 4) * optmat(ik, i_core, im, 6))
-        
+          print *, ik, i_core, im
+          print *, optmat(ik, i_core, im,:)
+          matcmpts(1) = optmat(ik, i_core, im, 1)**2 + &
+          &             optmat(ik, i_core, im, 2)**2
+          matcmpts(2) = optmat(ik, i_core, im, 3)**2 + & 
+          &             optmat(ik, i_core, im, 4)**2
+          matcmpts(3) = optmat(ik, i_core, im, 5)**2 + &
+          &             optmat(ik, i_core, im, 6)**2
+          matcmpts(4) = 2.0d0 * (optmat(ik, i_core, im, 1) * &
+          &                      optmat(ik, i_core, im, 3) + &
+          &               optmat(ik, i_core, im, 2) * &
+          &               optmat(ik, i_core, im, 4))
+          matcmpts(5) = 2.0d0 * (optmat(ik, i_core, im, 1) * &
+          &                      optmat(ik, i_core, im, 5) + &
+          &               optmat(ik, i_core, im, 2) * &
+          &               optmat(ik, i_core, im, 6))
+          matcmpts(6) = 2.0d0 * (optmat(ik, i_core, im, 3) * &
+          &                      optmat(ik, i_core, im, 5) + &
+          &               optmat(ik, i_core, im, 4) * &
+          &               optmat(ik, i_core, im, 6))
+          
           do iw=1,npts
             ! Lorentzian projection factor.
             delta_factor = invpi * smear_value / ((opttrans(ik, i_core, im) - w(iw))**2 + smear_value**2)

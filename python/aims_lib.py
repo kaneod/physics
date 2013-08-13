@@ -521,8 +521,8 @@ class AimsMomentumMatrixHDF5:
     
     self.kpoints = zeros((self.nkpts, 3))
     self.matrix_elements = zeros((self.nkpts, matrix_elements.shape[3], 6))
-    self.optical_matrix = zeros((self.nkpts, self.nstates, self.ntransitions, 6))
-    self.optical_transitions = zeros((self.nkpts, self.nstates, self.ntransitions))
+    self.optical_matrix = zeros((self.nkpts, self.nspins, self.nstates, self.ntransitions, 6))
+    self.optical_transitions = zeros((self.nkpts, self.self.nstates, self.ntransitions))
     self.eigenvalues = zeros((self.nkpts, self.nstates))
     
     for i in range(nkx):
@@ -628,102 +628,84 @@ class AimsMomentumMatrixText:
   nstates = 0
   nkpts = 1
   #kpoints = None # Once initialized has shape [nkpts, 4]
-  eigenvalues = None # Once initialized has shape [1, nstates]
-  matrix_elements = None # Once initialized has shape [1, nstates, nstates - 1, 6]
+  eigenvalues = None # Once initialized has shape [1, nstates, nspins]
+  matrix_elements = None # Once initialized has shape [1, nstates, nspins, nstates, nspins, 6]
   
-  efermi = None
-  
+  efermi = None  
   
   def __init__(self, filename):
-    """ Constructor for AimsMomentumMatrixText, pass the filename/path to the .h5 file containing
+    """ Constructor for AimsMomentumMatrixText, pass the filename/path to the .dat file containing
     the matrix elements:
     
     my_aimsmommat = aims_lib.AimsMomentumMatrixText("some_filename.dat")
     
     """
     
-    f = open(filename, 'r')
-    text = f.readlines()
-    f.close()
+    data = loadtxt(filename)
+  
+    # Need to check this because there might be spin-resolved output.
+    n = -0.5 + 0.5 * sqrt(1 + 8 * data.shape[0])
+  
+    if float(int(n)) == n:
+      self.nstates = int(n)
+      self.nspins = 1
+    else:
+      self.nstates = int(-0.5 + 0.5 * sqrt(1 + 8 * data.shape[0]/3))
+      self.nspins = 2
     
-    #self.kpoint_idx = int(text[0].split()[2])
-    #self.kpoint = array([float(x) for x in text[0].split()[4:7]])
-    
-    text = text[6:]
-    
-    self.nstates = int((-1 + sqrt(1 + 8.0 * len(text))) / 2)
     self.ntrans = self.nstates - 1
-    self.eigenvalues = zeros((1, self.nstates))
-    self.matrix_elements = zeros((len(text), 6))
+    self.matrix_elements = zeros((1, self.nstates, self.nspins, self.nstates, self.nspins, 6))
+    self.eigenvalues = zeros((1, self.nstates, self.nspins))
+  
+    index = 0
+    for si in range(self.nspins):
+      for sj in range(si,self.nspins):
+        for ni in range(self.nstates):
+          for nj in range(ni, self.nstates):
+            self.matrix_elements[0, ni, si, nj, sj, :] = data[index,6:12]
+            self.matrix_elements[0, nj, sj, ni, si, :] = data[index,6:12]
+            # Take the conjugate of the components in the lower half - note that the 
+            # diagonals don't matter because they should be real.
+            self.matrix_elements[0, nj, sj, ni, si,1] *= -1
+            self.matrix_elements[0, nj, sj, ni, si,3] *= -1
+            self.matrix_elements[0, nj, sj, ni, si,5] *= -1
+            self.eigenvalues[0, ni, si] = data[index,2]
+            index += 1
+    
+    # These matrices only contain spin transitions 1->2 (no same-spin transitions).
     self.optical_matrix = zeros((1, self.nstates, self.ntrans, 6))
     self.optical_transitions = zeros((1, self.nstates, self.ntrans))
     
-    transition_idx = 0
-    total_idx = 0
-
-    # First pass: read the whole file and just pull the matrix elements.
-    for i in range(len(text)):
-      bits = text[i].split()
-      self.matrix_elements[i,:] = array([float(x) for x in bits[4:10]])
-    
-    # Second pass: read only the first nstates-1 lines to pull all the eigenvalues.
-    for i in range(self.nstates - 1):
-      bits = text[i].split()
-      if i == 0:
-        self.eigenvalues[0,0] = float(bits[1])
-        self.eigenvalues[0,1] = float(bits[3])
-      else:
-        self.eigenvalues[0,i+1] = float(bits[3])
-    
     # Third pass: create the optical_matrix and optical_transitions arrays.
-    for m in range(self.nstates):
-      self.optical_matrix[0, m, :, :] = self.getElementsWithInitial(m)
-      self.optical_transitions[0, m, :] = self.getTransitionsWithInitial(m)
+    for s in range(self.nspins):
+      for m in range(self.nstates):
+        self.optical_matrix[0, m, :, :] = self.getOptMatElementsWithInitial(m, s)
+        self.optical_transitions[0, m, :] = self.getOptTransitionsWithInitial(m, s)
     
-  def getElementsWithInitial(self, i):
-    """ mat_elements = getElementsWithInitial(i)
+  def getOptMatElementsWithInitial(self, i, s):
+    """ mat_elements = getOptMatElementsWithInitial(i, s)
     
-    Returns a [nstates - 1, 6]-shape matrix with all the elements <i| del |j> 
+    Returns a [nstates - 1, 6]-shape matrix with all the elements <i,s| del |j,(s+1)%2> 
     for j != i.
     
     Note that i is 0-based, not 1-based.
     
     """
     
-    # The trick here is that  for all j > i we can just read the matrix elements
-    # directly from matrix_elements once we figure out an appropriate set of indices.
-    # For j < i, we need to hunt for the bits and take the complex conjugates.
-    
-    mat_elements = zeros((self.nstates - 1, 6))
+    mat_elements = zeros((self.ntrans, 6))
     transition_idx = 0
     total_idx = 0
         
-    for idx_i in range(0, self.nstates):
-      for idx_j in range(idx_i + 1, self.nstates):
-        if idx_i == i:
-          # Read directly 
-          mat_elements[transition_idx,:] = self.matrix_elements[total_idx, :]
-          transition_idx += 1
-        elif idx_j == i:
-          # Complex conjugates.
-          mat_elements[transition_idx,0] = self.matrix_elements[total_idx, 0]
-          mat_elements[transition_idx,1] = -1.0 * self.matrix_elements[total_idx, 1]
-          mat_elements[transition_idx,2] = self.matrix_elements[total_idx, 2]
-          mat_elements[transition_idx,3] = -1.0 * self.matrix_elements[total_idx, 3]
-          mat_elements[transition_idx,4] = self.matrix_elements[total_idx, 4]
-          mat_elements[transition_idx,5] = -1.0 * self.matrix_elements[total_idx, 5]
-          transition_idx += 1
-        # We only increment transition_idx if we actually are on a transition. 
-        # Otherwise just increment the total_idx.
-        total_idx += 1
+    mat_elements[i:, :] = self.matrix_elements[0, i, s, i+1:, (s+1)%2, :]
+    mat_elements[0:i, :] = self.matrix_elements[0, i, s, 0:i, (s+1)%2, :]
     
     return mat_elements
 
-  def getTransitionsWithInitial(self, i):
-    """ transitions = getTransitionsWithInitial(i)
+  def getOptTransitionsWithInitial(self, i, s):
+    """ transitions = getOptTransitionsWithInitial(i, s)
     
     Returns a [nstates - 1]-shape matrix with the transition energies Ej - Ei for each
-    j != i.
+    j != i. The spin of the final state is opposite to the spin of the initial state i.
     
     Note that i is 0-based, not 1-based.
     
@@ -732,7 +714,7 @@ class AimsMomentumMatrixText:
     transitions = []
     for j in range(self.eigenvalues.shape[1]):
       if j != i:
-        transitions.append(self.eigenvalues[0,j] - self.eigenvalues[0,i])
+        transitions.append(self.eigenvalues[0,j,(s+1)%2] - self.eigenvalues[0,i,s])
     
     return array(transitions)
   
@@ -799,18 +781,21 @@ class AimsNEXAFS:
       else:
         raise AimsERROR("aims_lib.AimsNEXAFS.__init__", "If using a non-HDF5 momentum matrix, a FHI-aims output file is also required.")    
    
-  def generateSpectrum(self, i_core, override_w=True):
-    """ worked = AimsNEXAFS.generateSpectrum(i_core, override_w=True)
+  def generateSpectrum(self, i_core, s_core=1, override_w=True):
+    """ worked = AimsNEXAFS.generateSpectrum(i_core, s_core=1, override_w=True)
     
     Populates the spectral_cmpts matrix using the momentum matrix elements. Note that
     we DO NOT SMEAR here - we set the smearing to half the step size as explained in
     the libpytep code. Smearing has to happen later on.
     
-    i_core is the KS index of the state used as the core level.
+    i_core is the KS index of the state used as the core level. s_core is the spin
+    channel of the core state - by default this is 1 and spin channel 2 is the final
+    state spectrum.
     
     By default (override_w=True), the w_start and w_end parameters are overwritten
     by new automatically generated values. If override_w=False, the existing ones are
     left in place if they exist at all.
+    
     
     """
     
@@ -822,10 +807,10 @@ class AimsNEXAFS:
     # dispersed with k, so any k choice will do if HDF5 input is used.
     
     if override_w or (not self.w_start):
-      self.w_start = self.mommatrix.efermi - self.mommatrix.eigenvalues[0,i_core] - 5.0
+      self.w_start = self.mommatrix.efermi - self.mommatrix.eigenvalues[0,i_core, s_core] - 5.0
     if override_w or (not self.w_end):
       maxe = amax(self.mommatrix.eigenvalues)
-      self.w_end = maxe - self.mommatrix.eigenvalues[0,i_core] + 5.0
+      self.w_end = maxe - self.mommatrix.eigenvalues[0,i_core, s_core] + 5.0
     
     if not self.num_points:
       self.num_points = 2000
@@ -843,7 +828,7 @@ class AimsNEXAFS:
     # object and not from FHI-aims itself. 
     self.spectral_cmpts = libaims.spectroscopy.generate_spectrum(self.mommatrix.optical_matrix, \
                                                 self.mommatrix.optical_transitions, \
-                                                self.mommatrix.eigenvalues, \
+                                                self.mommatrix.eigenvalues[0, i_core, s_core], \
                                                 self.w, self.mommatrix.efermi, i_core+1)
                                                 
   def experimentalSpectrum(self, polarization_vector):
