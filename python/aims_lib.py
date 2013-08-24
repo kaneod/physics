@@ -677,10 +677,12 @@ class AimsMomentumMatrixText:
     self.optical_transitions = zeros((1, self.nstates, self.ntrans))
     
     # Third pass: create the optical_matrix and optical_transitions arrays.
-    for s in range(self.nspins):
-      for m in range(self.nstates):
-        self.optical_matrix[0, m, :, :] = self.getOptMatElementsWithInitial(m, s)
-        self.optical_transitions[0, m, :] = self.getOptTransitionsWithInitial(m, s)
+    #for s in range(self.nspins):
+    # Note: no spin iteration - at present, aims outputs optical matrix elements for 
+    # transitions of spin 1 -> spin 2. So we only want s = 0.
+    for m in range(self.nstates):
+      self.optical_matrix[0, m, :, :] = self.getOptMatElementsWithInitial(m, 0)
+      self.optical_transitions[0, m, :] = self.getOptTransitionsWithInitial(m, 0)
     
   def getOptMatElementsWithInitial(self, i, s):
     """ mat_elements = getOptMatElementsWithInitial(i, s)
@@ -781,7 +783,7 @@ class AimsNEXAFS:
       else:
         raise AimsERROR("aims_lib.AimsNEXAFS.__init__", "If using a non-HDF5 momentum matrix, a FHI-aims output file is also required.")    
    
-  def generateSpectrum(self, i_core, s_core=1, override_w=True):
+  def generateSpectrum(self, i_core, s_core=0, override_w=True):
     """ worked = AimsNEXAFS.generateSpectrum(i_core, s_core=1, override_w=True)
     
     Populates the spectral_cmpts matrix using the momentum matrix elements. Note that
