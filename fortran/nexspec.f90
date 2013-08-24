@@ -163,6 +163,13 @@ program nexspec
   read(100) core_ion(1:ncproj)
   read(100) core_n(1:ncproj)
   read(100) core_lm(1:ncproj)
+  
+  ! Print out a table of available orbitals.
+  print *, "Orbital    ", "Species     ", "Ion         ", "n            ", "lm        "
+  
+  do orb=1,ncproj
+    print *, orb, core_species(orb), core_ion(orb), core_n(orb), core_lm(orb)
+  end do
 
   ! Loop over kpts, spins, orbitals, bands and populate optmat.
   do nk=1,nkpts
@@ -282,7 +289,7 @@ program nexspec
 !$OMP PARALLEL DO &
 !$OMP& DEFAULT(SHARED) &
 !$OMP& PRIVATE(ns, nk, nb, e_nks, f_nks, iw, w, smear_factor, icmpt, tmpstr) &
-!$OMP& PRIVATE(smear_value, matrix_cmpt)
+!$OMP& PRIVATE(matrix_cmpt)
   do ns=1,nspins
     do nk=1,nkpts
       do nb=iminband,mbands
