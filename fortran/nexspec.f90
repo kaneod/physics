@@ -1,6 +1,6 @@
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
-! nexspec.v2.f90
+! nexspec.f90
 !
 ! Simple NEXAFS spectrum generation code. Uses no tricks in an attempt to make the whole
 ! thing a bit more reliable!
@@ -309,6 +309,7 @@ program nexspec
           e_nks = eigen(nb,nk,ns) - efermi(ns)
         end if
         
+        print *, matrix_cmpt(1), optmat(orb,nb,1,nk,ns)
         ! Occupancy weighting: we don't deal with this at all anymore - f_nks is always 1.
         f_nks = 1.0d0
         
