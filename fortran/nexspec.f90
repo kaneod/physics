@@ -1,14 +1,13 @@
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
-! nexspec.f90
+! nexspec.v2.f90
 !
-! Code for generating a NEXAFS spectrum from CASTEP ELNES task output.
+! Simple NEXAFS spectrum generation code. Uses no tricks in an attempt to make the whole
+! thing a bit more reliable!
 !
-! Heavily based on Shang-Peng Gao's original EELSplot code. Many thanks to Shang-Peng
-! Gao and Chris Pickard for allowing this code to be GPL'd. 
+! 
 !
-!
-! Written by Kane O'Donnell (Australian Synchrotron), June 2012.
+! Written by Kane O'Donnell (Australian Synchrotron), August 2013.
 !
 ! Contact the author on gmail, username kane dot odonnell
 !
@@ -33,14 +32,13 @@
 !
 ! Notes:
 !
-! 1. nexspec doesn't read a parameters file yet - you have to change the options
-!     below and recompile.
-!
-! 2. Compiling with gfortran -o nexspec nexspec.f90 should work - no fancy tricks
-!     required in conventional cases. Then call nexspec with nexspec SEED just
-!     like CASTEP.
+! 1. Usage is just nexspec SEED PROJECTOR [MINBAND]. Assumes the existence of SEED.bands
+! and SEED.eels_mat, PROJECTOR is the core projector to use as an initial state and 
+! MINBAND (optional) is the minimum band to be included in the spectrum - effectively 
+! allows manual tuning of the Fermi level.
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 program nexspec
 
   implicit none
@@ -50,133 +48,98 @@ program nexspec
   character(len=80),parameter :: ENDIAN = 'big_endian' ! CASTEP is conventionally compiled
   ! as a big-endian code: if you get ridiculous results from nexspec check if changing
   ! this to 'native' fixes it.
-  character(len=80), parameter :: param_file = 'nexspec.param'
   real(kind=dp), parameter :: invpi = 0.3183098861837907d0
   real(kind=dp), parameter :: pi = 3.141592653589793d0
   real(kind=dp), parameter :: invsqrt2pi = 0.3989422804014327d0
   real(kind=dp), parameter :: invfinestruct = 137.035999074d0
   real(kind=dp), parameter :: hart2eV = 27.211396132d0
-  real(kind=dp), parameter :: tol = 1.0d-16
+  real(kind=dp), parameter :: tol = 1.0d-99
   
-  ! Spectrum parameters - will take from nexspec.param if it exists.
-  integer :: smear_method = 1 ! 0 for Lorentzian, 1 for Gaussian.
-  real(kind=dp) :: smear_width = 0.3d0 ! eV
-  real(kind=dp) :: w_start = 275.0d0 ! eV
-  real(kind=dp) :: w_end = 320.0d0 
-  integer :: spectrum_points = 2000
+  real(kind=dp) :: smear_width ! eV
+  integer, parameter :: spectrum_points = 2000
+  real(kind=dp) :: w_start = -25.0 ! eV
+  real(kind=dp) :: w_end = 65.0 ! eV
+  real(kind=dp) :: w_step, w(spectrum_points)
+  real(kind=dp) :: gwidth = 0.4 ! eV
+  real(kind=dp) :: lwidth = 0.2 ! eV
   
-  ! Options for more realistic spectra - EDIT THESE FOR YOUR SPECTRUM
-  ! What is going on here:
-  !
-  ! The idea is that we want to be able to apply the proper physical prefactor for 
-  ! optical adsorption. However, we can't do this if we're on the wrong energy
-  ! scale, as the scaling is energy-dependent and non-linear. So, if scaling_prefactor
-  ! is true, we need a non-zero (physical) core level. Can only handle one of these
-  ! at the moment - eventually will have an array with e_core for each ion.
-  logical :: scaling_prefactor = .true.
-  real(kind=dp) :: e_core = -290.0d0 ! eV
-  
-  ! If non_uniform_broadening is activated, we increase the smearing width
-  ! as a function of distance from the transition edge. The formula used sets
-  ! the smearing to 0 eV at smear_offset below the transition energy (the
-  ! absolute value of the core level) and to smear_width at the transition
-  ! energy itself. The smearing function is linear. So, increase smear_offset 
-  ! to slow the broadening, or just set non_uniform_broadening to .false.
-  ! The default value of 145 eV is roughly equivalent to Gao's 0.1E+smear_width
-  ! function for the carbon edge.
-  logical :: non_uniform_broadening = .true.
-  real(kind=dp) :: smear_offset = 145.0d0 ! eV
-  real(kind=dp) :: smear_value = 0.0d0
-  real(kind=dp) :: smear_intercept = 0.0d0
-  real(kind=dp) :: smear_gradient = 0.0d0
-  
-  ! If zero_fermi is true, all spectra have the eigenvalues subtracted so
-  ! efermi = 0.0 eV. This is not a good idea for core-hole calculations
-  ! where each atomic excitation leads to a completely different energy
-  ! spectrum.
-  logical :: zero_fermi = .false.
-  
-  ! Parameter file
+  ! File stuff
   logical :: file_exists = .false.
   character(len=80) :: seed, tmpstr, atstr(4)
-  integer :: nargs, nk, orb, ns, nb, iw, icmpt
+  integer :: nargs, nk, orb, ns, nb, iw, icmpt, cproj, iminband
   
   integer :: ncproj, mbands, nkpts, nspins, tmpi, nbands(2)
   integer, dimension(:), allocatable :: core_species, core_ion, core_n, core_lm
   complex(kind=dp), dimension(:,:,:,:,:), allocatable :: optmat
   real(kind=dp), dimension(:), allocatable :: wk
-  real(kind=dp), dimension(:,:), allocatable :: kpts
+  real(kind=dp), dimension(:,:), allocatable :: kpts, cspectrum
   real(kind=dp), dimension(:,:,:), allocatable :: eigen, spectrum
-  real(kind=dp) :: efermi(2), nelectrons(2), lvec(3,3), w_step, w
-  real(kind=dp) :: matrix_cmpt(6), e_nks, f_nks, smear_factor
+  real(kind=dp) :: efermi(2), nelectrons(2), lvec(3,3)
+  real(kind=dp) :: matrix_cmpt(6), e_nks, f_nks, smear_factor, e_min
   
-  ! Check if nexspec.param is there: if so, set parameters.
-  inquire(file=param_file, exist=file_exists)
-  
-  if (file_exists) then
-    open(unit=300, file=param_file, form='formatted', status='old')
-    read(300,*) smear_method
-    read(300,*) smear_width
-    read(300,*) w_start
-    read(300,*) w_end
-    read(300,*) spectrum_points
-    read(300,*) scaling_prefactor
-    read(300,*) e_core
-    read(300,*) non_uniform_broadening
-    read(300,*) smear_offset
-    read(300,*) zero_fermi
-    close(300)
-  end if
-  
-  if (non_uniform_broadening .neqv. .true.) then
-    smear_value = smear_width
-  else
-    smear_gradient = smear_width / smear_offset
-    smear_intercept = smear_width / (dabs(e_core) / (dabs(e_core) - smear_offset) - 1.0d0)
-  end if
-  
-  ! Get the seedname from the command line, fail with usage if nargs != 1.
+  print *, "NEXSPEC version 2"
+  print *, " "
+  print *, "Written by Kane O'Donnell, August 2013"
+  print *, " "
+
+  ! Get SEED from args
   nargs = command_argument_count()
-  if ((nargs .ne. 1) .and. (nargs .ne. 2)) then
-    write(*,*) "Usage: nexspec SEED [CORELEVEL_ENERGY]"
-    write(*,*) " "
-    write(*,*) "Parameter file nexspec.param:"
-    write(*,*) " "
-    write(*,*) " smear_method: 0 (Lorentzian) or 1 (Gaussian, default)"
-    write(*,*) " smear_width: in eV (default 0.3)"
-    write(*,*) " w_start: Starting photon energy in eV (default 275.0)"
-    write(*,*) " w_end: End photon energy in eV (default 320.0)"
-    write(*,*) " spectrum_points: Number of points in the spectrum (default 2000)"
-    write(*,*) " scaling_prefactor: Set to .true. to scale spectrum by 1/w (default .true.)"
-    write(*,*) "         Note: the 1/w factor appears in the cross section for NEXAFS, see Stohr."
-    write(*,*) " e_core: Core level energy in eV, should be negative (default -290.0)"
-    write(*,*) "         Note: this is overridden by the command-line input." 
-    write(*,*) " non_uniform_broadening: Set to .true. (default) to use an energy-dependent smearing"
-    write(*,*) "         width to generate assymetric lineshapes. See Stohr chapter 7.2."
-    write(*,*) " smear_offset: Energy offset before the edge at which point the smearing is"
-    write(*,*) "         zero. Should be positive. Default is 145.0, gives Gao's smearing for carbon."
-    write(*,*) " zero_fermi: Set to .true. to subtract e_fermi from all the energy levels"
-    write(*,*) "         before processing. This is a Bad Thing (TM) when adding spectra"
-    write(*,*) "         from separate core hole calculations together so is .false. by default."
-    
-    call exit(0)
-  end if
-  
-  call get_command_argument(1,seed)
   if (nargs .eq. 2) then
+    call get_command_argument(1,seed)
     call get_command_argument(2,tmpstr)
-    read(tmpstr, *) e_core
-  end if
-  
-  ! Open the .eels_mat file and read the header.
-  open(unit=100, file=adjustl(trim(seed))//'.eels_mat', form='unformatted',&
-&     status='old', convert=ENDIAN)
+    read(tmpstr, *) cproj
+    iminband = 0
+  elseif (nargs .eq. 3) then
+    call get_command_argument(1,seed)
+    call get_command_argument(2,tmpstr)
+    read(tmpstr, *) cproj
+    call get_command_argument(3, tmpstr)
+    read(tmpstr, *), iminband
+  else  
+    print *, " "
+    print *, "USAGE: nexspec SEED PROJECTOR [MINBAND]"
+    print *, " "
+    print *, "Require SEED.bands and SEED.eels_mat. PROJECTOR is the core initial state index."
+    print *, "MINBAND (optional) is the minimum band to be included in the spectrum, can be "
+    print *, "used to effectively tune the Fermi level."
+    call exit(0)
+  endif
+
+  ! Inquire if the relevant files exist - if not, die.
+  inquire(file=adjustl(trim(seed))//'.eels_mat', exist=file_exists)
+  if (file_exists) then
+    open(unit=100, file=adjustl(trim(seed))//'.eels_mat', form='unformatted',&
+  &     status='old', convert=ENDIAN)
+  endif
+
+  inquire(file=adjustl(trim(seed))//'.bands', exist=file_exists)
+  if (file_exists) then
+    open(unit=200, file=adjustl(trim(seed))//'.bands', form='formatted', &
+  &       status='old')
+  endif
+
+  ! Read everything we need from the eels_mat file.
 
   read(100) ncproj
   read(100) mbands
   read(100) nkpts
-  read(100) nspins
+  read(100) nspins   
   
+  ! Check we specified something sensible for cproj and iminband
+  if ((cproj .lt. 1) .or. (cproj .gt. ncproj)) then
+    print *, "ERROR: You've specified a projector out of the range 1 - ", ncproj
+    call exit(0)
+  endif
+  
+  if (iminband .gt. mbands) then
+    print *, "ERROR: You've specified a minimum band outside the range 1 - ", mbands
+    call exit(0)
+  endif
+  
+  if (iminband .eq. 1) then
+    print *, "WARNING: You've specified iminband = 1 - this is almost certainly a non-physical spectrum!"
+  end if
+
   ! Echo some output.
   
   write(*,*) "Opened file ", adjustl(trim(seed))//'.eels_mat', " for NEXAFS spectrum generation."
@@ -184,23 +147,23 @@ program nexspec
   write(*,*) "Maximum number of bands per kpt/spin = ", mbands
   write(*,*) "Number of K-points = ", nkpts
   write(*,*) "Number of spins = ", nspins
-  
+
   ! Allocate the various arrays that store information about the core orbitals.
   allocate(core_species(ncproj), core_ion(ncproj), core_n(ncproj), &
-&           core_lm(ncproj))
+  &        core_lm(ncproj))
 
   ! optmat is the optical transitions matrix.
   allocate(optmat(ncproj,mbands,3,nkpts,nspins))
-  
+
   ! Allocate wk (kpoints weighting), eigen (the eigenvalues) and kpts
   allocate(wk(nkpts), eigen(mbands,nkpts,nspins), kpts(nkpts,3))
-  
+
   ! Read the information about the core orbitals.
   read(100) core_species(1:ncproj)
   read(100) core_ion(1:ncproj)
   read(100) core_n(1:ncproj)
   read(100) core_lm(1:ncproj)
-  
+
   ! Loop over kpts, spins, orbitals, bands and populate optmat.
   do nk=1,nkpts
     do ns=1,nspins
@@ -211,28 +174,28 @@ program nexspec
       end do
     end do
   end do
-  
+
   ! We're now done with the .eels_mat file, start on the .bands file next.
   close(100)
-  open(unit=200, file=adjustl(trim(seed))//'.bands', form='formatted', &
-&       status='old')
-
-  ! Most of the header is redundant in the bands file but we need to cross-
-  ! check the number of kpoints, spins and eigenvalues. We also get the
-  ! lattice vectors, number of electrons and fermi-level for free!
-  read(200,'(19x,I5)') tmpi
   
+  ! Check that we have the same number of kpoints, spins, etc - there is a lot of 
+  ! redundant information in the bands file but we might as well check it's the same.
+  read(200,'(19x,I5)') tmpi
+
   if (tmpi .ne. nkpts) then
     write(*,*) "ERROR: Number of k-points in .bands is not equal to the number in .eels_mat."
-    call exit(1)
+    write(*,*) "ERROR: The module is now in an uncertain state: re-initialize before use."
+    call exit(0)
   end if
-  
+
   read(200,'(26x,I1)') tmpi
   if (tmpi .ne. nspins) then
     write(*,*) "ERROR: Number of spins in .bands is not equal to the number in .eels_mat."
-    call exit(1)
+    write(*,*) "ERROR: The module is now in an uncertain state: re-initialize before use."
+    call exit(0)
   end if  
-  
+
+  ! Note: nelectrons here is TOTALLY UNRELIABLE but we read it anyway.
   if (DEBUG .eq. 1) then
     print *, "Made it past integer reads"
   end if
@@ -241,7 +204,7 @@ program nexspec
     read(200,'(22x,I6)') nbands(1)
     read(200,'(31x,F12.6)') efermi(1)
     write(*,*) "Inside the .bands file we get:"
-    write(*,*) "Number of electrons = ", nelectrons(1)
+    write(*,*) "Number of electrons (possibly wrong!) = ", nelectrons(1)
     write(*,*) "Number of bands = ", nbands(1)
     write(*,*) "Fermi level = ", efermi(1), " Ha"
   else
@@ -249,16 +212,16 @@ program nexspec
     read(200,'(22x,2I6)') nbands(1:2)
     read(200,'(33x,2F12.6)') efermi(1:2)
     write(*,*) "Inside the .bands file we get:"
-    write(*,*) "Number of electrons = ", nelectrons(1:2)
+    write(*,*) "Number of electrons (wrong!) = ", nelectrons(1:2)
     write(*,*) "Number of bands = ", nbands(1:2)
-    write(*,*) "Fermi level = ", efermi(1:2), " Ha"
+    write(*,*) "Fermi level = ", efermi(1:2)*hart2eV, " eV"
   end if
-  
+
   read(200,*)
   read(200,'(3F12.6)') lvec(1:3,1)
   read(200,'(3F12.6)') lvec(1:3,2)
   read(200,'(3F12.6)') lvec(1:3,3)
-  
+
   do nk=1,nkpts
     read(200,'(8x,I5,4F12.8)') tmpi, kpts(nk,1:3), wk(nk)
     do ns=1,nspins
@@ -268,133 +231,196 @@ program nexspec
         end do
     end do
   end do
-  
+
   close(200)
-  ! So: we have everything, let's generate the spectrum!
   
-  ! First we should really generate an occupancy function.
-  ! But, let's just go T=0K and take f_nks = 0 if e_nks < efermi
+  ! Right, now we can generate the spectrum. We don't worry *at all* about occupancies
+  ! or where the fermi level really is, etc - we just subtract the fermi level from
+  ! all eigenvalues and the end user of the spectra can apply a Fermi function afterwards
+  ! along with the proper smearing.
   
-  ! If set, zero the fermi level.
-  if (zero_fermi .eqv. .true.) then
-    if (nspins .eq. 1) then
-      eigen = eigen - efermi(1)
-      efermi(1) = 0.0d0
-    else
-      if (efermi(1) .gt. efermi(2)) then
-        eigen = eigen - efermi(1)
-        efermi(2) = efermi(2) - efermi(1)
-        efermi(1) = 0.0d0
-      else
-        eigen = eigen - efermi(2)
-        efermi(1) = efermi(1) - efermi(2)
-        efermi(2) = 0.0d0
-      end if
-    end if
-  end if
+  efermi = efermi * hart2eV
+  eigen = eigen * hart2eV
   
-  ! 6 spectrum components for arbitrary angle reconstruction
-  allocate(spectrum(ncproj, spectrum_points, 6))
+  ! If the user actually specified iminband, use it to find the minimum energy.
+  if (iminband .gt. 0) then
+    do nk=1,nkpts
+      do ns=1,nspins
+          do nb=iminband,nbands(ns)
+            if (eigen(nb,nk,ns) .lt. e_min) then
+              e_min = eigen(nb,nk,ns)
+            end if
+    !        if (eigen(nb,nk,ns) - efermi(ns) < w_start) then
+    !          w_start = eigen(nb,nk,ns) - efermi(ns) - 5.0d0
+    !        endif
+    !        if (eigen(nb,nk,ns) - efermi(ns) > w_end) then
+    !          w_end = eigen(nb,nk,ns) - efermi(ns) + 5.0d0
+    !        endif 
+          end do
+      end do
+    end do
+  end if 
+  
+  print *, "Generating a spectrum from ", w_start, "to", w_end, 'eV'
+  
+  allocate(spectrum(spectrum_points, nspins, 6)) ! Separate spins
+  allocate(cspectrum(spectrum_points,6)) ! This is the spectrum with combined spins
   
   spectrum = 0.0d0
-  w_step = (w_end - w_start) / spectrum_points
+  cspectrum = 0.0d0
   
-  ! For each orbital, sum matrix elements over k, s and w for each b.
-  ! Each orbital is independent so we can do this in parallel.
+  w_step = (w_end - w_start) / spectrum_points
+  do iw=1,spectrum_points
+    w(iw) = w_start + (iw-1)*w_step
+  end do
+  smear_width = w_step * 0.5
+  !smear_width = 0.5
+  orb = cproj
+  
+  ! Loop over bands, kpoints and spins - fix on a particular cproj. Note we can
+  ! use OpenMP here if we want to.
 !$OMP PARALLEL DO &
 !$OMP& DEFAULT(SHARED) &
 !$OMP& PRIVATE(ns, nk, nb, e_nks, f_nks, iw, w, smear_factor, icmpt, tmpstr) &
 !$OMP& PRIVATE(smear_value, matrix_cmpt)
-  do orb=1,ncproj
-    do ns=1,nspins
-      do nk=1,nkpts
-        do nb=1,mbands
-          
-          matrix_cmpt(1) = realpart(optmat(orb,nb,1,nk,ns) * dconjg(optmat(orb,nb,1,nk,ns)))
-          matrix_cmpt(2) = realpart(optmat(orb,nb,2,nk,ns) * dconjg(optmat(orb,nb,2,nk,ns)))
-          matrix_cmpt(3) = realpart(optmat(orb,nb,3,nk,ns) * dconjg(optmat(orb,nb,3,nk,ns)))
-          matrix_cmpt(4) = 2.0d0 * realpart(optmat(orb,nb,1,nk,ns) * dconjg(optmat(orb,nb,2,nk,ns)))
-          matrix_cmpt(5) = 2.0d0 * realpart(optmat(orb,nb,1,nk,ns) * dconjg(optmat(orb,nb,3,nk,ns)))
-          matrix_cmpt(6) = 2.0d0 * realpart(optmat(orb,nb,2,nk,ns) * dconjg(optmat(orb,nb,3,nk,ns)))
-          
-          e_nks = eigen(nb,nk,ns) * hart2eV
-          if (eigen(nb,nk,ns) .ge. efermi(ns)) then
-            f_nks = 1.0d0
-          else
-            f_nks = 0.0d0
-          end if
-          
-          do iw=1,spectrum_points
-            w = w_start + (iw-1)*w_step
-            if (non_uniform_broadening .eqv. .true.) then
-              smear_value = smear_gradient * w - smear_intercept
-            end if
-            if (smear_method .eq. 0) then
-              ! Lorentzian
-              smear_factor = invpi * smear_value / ((e_nks - e_core - w)**2 + (smear_value)**2)
-            else
-              ! Gaussian
-              smear_factor = invsqrt2pi * 1.0d0 / smear_value * dexp(-0.5d0 * ((e_nks - e_core - w)/smear_value)**2)
-            end if
-            do icmpt=1,6
-              spectrum(orb,iw,icmpt) = spectrum(orb,iw,icmpt) + wk(nk) * f_nks * matrix_cmpt(icmpt) * smear_factor
-            end do
+  do ns=1,nspins
+    do nk=1,nkpts
+      do nb=iminband,mbands
+        
+        matrix_cmpt(1) = realpart(optmat(orb,nb,1,nk,ns) * dconjg(optmat(orb,nb,1,nk,ns)))
+        matrix_cmpt(2) = realpart(optmat(orb,nb,2,nk,ns) * dconjg(optmat(orb,nb,2,nk,ns)))
+        matrix_cmpt(3) = realpart(optmat(orb,nb,3,nk,ns) * dconjg(optmat(orb,nb,3,nk,ns)))
+        matrix_cmpt(4) = 2.0d0 * realpart(optmat(orb,nb,1,nk,ns) * dconjg(optmat(orb,nb,2,nk,ns)))
+        matrix_cmpt(5) = 2.0d0 * realpart(optmat(orb,nb,1,nk,ns) * dconjg(optmat(orb,nb,3,nk,ns)))
+        matrix_cmpt(6) = 2.0d0 * realpart(optmat(orb,nb,2,nk,ns) * dconjg(optmat(orb,nb,3,nk,ns)))
+        
+        ! If the user actually set a min band, use it as the zero of energy, otherwise
+        ! zero the fermi level.
+        if (iminband .gt. 0) then
+          e_nks = eigen(nb,nk,ns) - e_min
+        else
+          e_nks = eigen(nb,nk,ns) - efermi(ns)
+        end if
+        
+        ! Occupancy weighting: we don't deal with this at all anymore - f_nks is always 1.
+        f_nks = 1.0d0
+        
+        do iw=1,spectrum_points
+          ! Tiny lorentzian smear to project onto the nearest spectrum point.
+          smear_factor = invpi * smear_width / ((e_nks - w(iw))**2 + (smear_width)**2)
+          do icmpt=1,6
+            spectrum(iw,ns,icmpt) = spectrum(iw,ns,icmpt) + wk(nk) * f_nks * matrix_cmpt(icmpt) * smear_factor
+            cspectrum(iw,icmpt) = cspectrum(iw,icmpt) + wk(nk) * f_nks * matrix_cmpt(icmpt) * smear_factor
           end do
         end do
       end do
     end do
+  end do
+!$OMP END PARALLEL DO
     
-    ! Zero tiny values to make sure the output can be read by Python.
-    do iw=1,spectrum_points
+  ! Zero tiny values to make sure the output can be read.
+  do iw=1,spectrum_points
+    do ns=1,nspins
       do icmpt=1,6
-        if (dabs(spectrum(orb,iw,icmpt)) .lt. tol) then
-          spectrum(orb,iw,icmpt) = 0.0d0
+        if (dabs(spectrum(iw,ns,icmpt)) .lt. tol) then
+          spectrum(iw,ns,icmpt) = 0.0d0
         end if
       end do
     end do
   end do
-!$OMP END PARALLEL DO
-  
-  ! Optional - apply an inverse-frequency scaling. This makes the spectrum actually
-  ! scale like the adsorption spectrum should, but on the other hand, relies on setting 
-  ! the core energy correctly, otherwise the scaling is far too strong near
-  ! the edge.
-  ! Note: A volume factor is missing here. Should use the lattice parameters to generate
-  ! the volume and divide that out as well.
-    
-  if (scaling_prefactor) then
-    do iw=1,spectrum_points
-      w = w_start + (iw-1)*w_step
-      spectrum(1:ncproj,iw,1:6) = (8.0d0 * pi ** 2 * invfinestruct / (3.0d0 * w)) * &
-&                                   spectrum(1:ncproj,iw,1:6)
-    end do
-  end if
-  
 
-  do orb=1,ncproj    
-    ! Output each spectrum to a file.
-    !tmpstr = ''
-    write(*,*) 'Writing orbital ', orb
-    write(atstr(1), '(I4)') core_species(orb)
-    write(atstr(2), '(I4)') core_ion(orb)
-    write(atstr(3), '(I4)') core_n(orb)
-    write(atstr(4), '(I4)') core_lm(orb)
-    tmpstr = trim(adjustl(atstr(1)))//'_'//trim(adjustl(atstr(2)))//'_'//trim(adjustl(atstr(3)))//'_'&
-&             //trim(adjustl(atstr(4)))
-    open(300,file=trim(seed)//'_'//trim(adjustl(tmpstr))//'.nexafs',form='formatted')
-    
+! Write spectra in the following files:
+!   SEED_spinX.raw.nexafs for X=1->ns,
+!   SEED.raw.nexafs - both spin channels combined.
+!   SEED_spinX.smeared.nexafs for X=1->ns,
+!   SEED.smeared.nexafs - smeared with both channels combined.
+
+  do ns=1,nspins
+    write(*,*) 'Writing raw spectrum for orbital ', orb, 'spin ', ns
+    write(atstr(1), '(I4)') ns
+    !write(atstr(2), '(I4)') core_ion(orb)
+    !write(atstr(3), '(I4)') core_n(orb)
+    !write(atstr(4), '(I4)') core_lm(orb)
+    !tmpstr = trim(adjustl(atstr(1)))//'_'//trim(adjustl(atstr(2)))//'_'//trim(adjustl(atstr(3)))//'_'&
+  !&             //trim(adjustl(atstr(4)))
+    tmpstr = trim(adjustl(atstr(1)))
+    open(300,file=trim(seed)//'_spin'//trim(adjustl(tmpstr))//'.raw.nexafs',form='formatted')
+  
     write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
-    write(300,*) '#'
-    write(300,*) '# Omega (Ha) Mxx Myy Mzz Mxy Mxz Myz'
-    
+    write(300,*) '# Spin channel: ', ns
+    write(300,*) '# Omega (eV) Mxx Myy Mzz Mxy Mxz Myz'
+  
     do iw=1,spectrum_points
-      write(300, '(7g16.8)') w_start + (iw-1)*w_step, spectrum(orb,iw,1:6)
+      write(300, '(7g16.8)') w(iw), spectrum(iw,ns,1:6)
     end do
+  
     close(300)
   end do
+
+  write(*,*) 'Writing raw spectrum for orbital ', orb, 'with combined spins'
+  open(300,file=trim(seed)//'.raw.nexafs',form='formatted')
+
+  write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
+  write(300,*) '#'
+  write(300,*) '# Omega (eV) Mxx Myy Mzz Mxy Mxz Myz'
+
+  do iw=1,spectrum_points
+    write(300, '(7g16.8)') w(iw), cspectrum(iw,1:6)
+  end do
+
+  close(300)
+  ! Write out a nominally-smeared (0.2 Lorentzian, 0.4 eV Gaussian, no linear) spectrum
+  
+  do ns=1,nspins
+    do icmpt=1,6
+      call lorentzian_convolute(w,spectrum(:,ns,icmpt),spectrum_points, lwidth)
+      call gaussian_convolute(w,spectrum(:,ns,icmpt),spectrum_points, gwidth)
+    end do
+  end do
+
+  do ns=1,nspins  
+    write(*,*) 'Writing smeared spectrum for orbital ', orb, 'spin ', ns
+    write(atstr(1), '(I4)') ns
+    !write(atstr(2), '(I4)') core_ion(orb)
+    !write(atstr(3), '(I4)') core_n(orb)
+    !write(atstr(4), '(I4)') core_lm(orb)
+    !tmpstr = trim(adjustl(atstr(1)))//'_'//trim(adjustl(atstr(2)))//'_'//trim(adjustl(atstr(3)))//'_'&
+  !&             //trim(adjustl(atstr(4)))
+    tmpstr = trim(adjustl(atstr(1)))
+    open(300,file=trim(seed)//'_spin'//trim(adjustl(tmpstr))//'.smeared.nexafs',form='formatted')
+  
+    write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
+    write(300,*) '# Smeared with lorentzian and gaussian broadening,', lwidth, gwidth, 'eV respectively'
+    write(300,*) '# Omega (eV) Mxx Myy Mzz Mxy Mxz Myz'
+  
+    do iw=1,spectrum_points
+      write(300, '(7g16.8)') w(iw), spectrum(iw,ns,1:6)
+    end do
+  
+    close(300)
+  end do
+
+  do icmpt=1,6
+    call lorentzian_convolute(w,cspectrum(:,icmpt),spectrum_points, lwidth)
+    call gaussian_convolute(w,cspectrum(:,icmpt),spectrum_points, gwidth)
+  end do 
+  
+  write(*,*) 'Writing raw spectrum for orbital ', orb, 'with combined spins'
+  open(300,file=trim(seed)//'.smeared.nexafs',form='formatted')
+
+  write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
+  write(300,*) '# Smeared with lorentzian and gaussian broadening,', lwidth, gwidth, 'eV respectively'
+  write(300,*) '# Omega (eV) Mxx Myy Mzz Mxy Mxz Myz'
+
+  do iw=1,spectrum_points
+    write(300, '(7g16.8)') w(iw), cspectrum(iw,1:6)
+  end do
+
+  close(300)
   
   ! Deallocate everything
   deallocate(spectrum)
+  deallocate(cspectrum)
   deallocate(wk)
   deallocate(optmat)
   deallocate(eigen)
@@ -405,4 +431,104 @@ program nexspec
   deallocate(core_lm)
   
   write(*,*) "Finished nexspec - Goodbye!"
+  
+  contains 
+  
+  subroutine gaussian_convolute(xdata, ydata, num_points, gwidth)
+    !---------------------------------------------------------------------------
+    !
+    ! gaussian_convolute: a conventional convolution where the gaussian function
+    ! of width gwidth is the second factor in the integral.
+    !
+    !---------------------------------------------------------------------------
+    
+    integer, intent(in) :: num_points
+    real(kind=dp), intent(inout) :: xdata(num_points), ydata(num_points)
+    real(kind=dp) :: tmp(num_points), dx
+    real(kind=dp), intent(in) :: gwidth
+    integer :: i, j
+    
+    ! Assume the step is even (!!)
+    dx = xdata(2) - xdata(1)
+    
+    tmp = 0.0d0
+    
+    do i=1,num_points
+      do j=1,num_points
+        tmp(i) = tmp(i) + dx * ydata(j) * invsqrt2pi * 1.0d0 / gwidth * dexp( &
+        &        -0.5d0 * ((xdata(i) - xdata(j)) / gwidth)**2)
+      end do
+    end do
+    
+    ydata = tmp
+    
+    return
+  end subroutine
+  
+  subroutine lorentzian_convolute(xdata, ydata, num_points, lwidth)
+    !---------------------------------------------------------------------------
+    !
+    ! lorentzian_convolute: a conventional convolution where the lorentzian function
+    ! of width gwidth is the second factor in the integral.
+    !
+    !---------------------------------------------------------------------------
+    
+    integer, intent(in) :: num_points
+    real(kind=dp), intent(inout) :: xdata(num_points), ydata(num_points)
+    real(kind=dp) :: tmp(num_points), dx
+    real(kind=dp), intent(in) :: lwidth
+    integer :: i, j
+    
+    ! Assume the step is even (!!)
+    dx = xdata(2) - xdata(1)
+    
+    tmp = 0.0d0
+    
+    do i=1,num_points
+      do j=1,num_points
+        tmp(i) = tmp(i) + dx * ydata(j) * invpi * (lwidth / ((xdata(i) - xdata(j))**2 + &
+        & lwidth**2))
+      end do
+    end do
+    
+    ydata = tmp
+    
+    return
+  end subroutine
+  
+  subroutine lorentzian_linear_convolute(xdata, ydata, num_points, lwidth, llin)
+    !---------------------------------------------------------------------------
+    !
+    ! lorentzian_linear_convolute: a conventional convolution where the lorentzian function
+    ! of width gwidth is the second factor in the integral. The linear broadening is 
+    ! applied as lwidth + llin * | x(j) |, where x(j) is the x value of the spectrum
+    ! being convoluted.  
+    !
+    !---------------------------------------------------------------------------
+    
+    integer, intent(in) :: num_points
+    real(kind=dp), intent(inout) :: xdata(num_points), ydata(num_points)
+    real(kind=dp) :: tmp(num_points), dx
+    real(kind=dp), intent(in) :: lwidth, llin
+    integer :: i, j
+    
+    ! Assume the step is even (!!)
+    dx = xdata(2) - xdata(1)
+    
+    tmp = 0.0d0
+    
+    do i=1,num_points
+      do j=1,num_points
+        tmp(i) = tmp(i) + dx * ydata(j) * invpi * ((lwidth + llin * dabs( &
+        & xdata(j)))/ ((xdata(i) - xdata(j))**2 + (lwidth + llin * dabs( &
+        & xdata(j)))**2))
+      end do
+    end do
+    
+    ydata = tmp
+    
+    return
+  end subroutine
+  
 end program
+
