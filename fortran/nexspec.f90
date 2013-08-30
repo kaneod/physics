@@ -346,13 +346,13 @@ program nexspec
   do ns=1,nspins
     write(*,*) 'Writing raw spectrum for orbital ', orb, 'spin ', ns
     write(atstr(1), '(I4)') ns
-    !write(atstr(2), '(I4)') core_ion(orb)
+    write(atstr(2), '(I4)') orb
     !write(atstr(3), '(I4)') core_n(orb)
     !write(atstr(4), '(I4)') core_lm(orb)
     !tmpstr = trim(adjustl(atstr(1)))//'_'//trim(adjustl(atstr(2)))//'_'//trim(adjustl(atstr(3)))//'_'&
   !&             //trim(adjustl(atstr(4)))
-    tmpstr = trim(adjustl(atstr(1)))
-    open(300,file=trim(seed)//'_spin'//trim(adjustl(tmpstr))//'.raw.nexafs',form='formatted')
+    tmpstr = '_orb'//trim(adjustl(atstr(2)))//'_spin'//trim(adjustl(atstr(1)))
+    open(300,file=trim(seed)//trim(adjustl(tmpstr))//'.raw.nexafs',form='formatted')
   
     write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
     write(300,*) '# Spin channel: ', ns
@@ -366,7 +366,8 @@ program nexspec
   end do
 
   write(*,*) 'Writing raw spectrum for orbital ', orb, 'with combined spins'
-  open(300,file=trim(seed)//'.raw.nexafs',form='formatted')
+  tmpstr = '_orb'//trim(adjustl(atstr(2)))
+  open(300,file=trim(seed)//trim(adjustl(tmpstr))//'.raw.nexafs',form='formatted')
 
   write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
   write(300,*) '#'
@@ -389,13 +390,13 @@ program nexspec
   do ns=1,nspins  
     write(*,*) 'Writing smeared spectrum for orbital ', orb, 'spin ', ns
     write(atstr(1), '(I4)') ns
-    !write(atstr(2), '(I4)') core_ion(orb)
+    write(atstr(2), '(I4)') orb
     !write(atstr(3), '(I4)') core_n(orb)
     !write(atstr(4), '(I4)') core_lm(orb)
     !tmpstr = trim(adjustl(atstr(1)))//'_'//trim(adjustl(atstr(2)))//'_'//trim(adjustl(atstr(3)))//'_'&
   !&             //trim(adjustl(atstr(4)))
-    tmpstr = trim(adjustl(atstr(1)))
-    open(300,file=trim(seed)//'_spin'//trim(adjustl(tmpstr))//'.smeared.nexafs',form='formatted')
+    tmpstr = '_orb'//trim(adjustl(atstr(2)))//'_spin'//trim(adjustl(atstr(1)))
+    open(300,file=trim(seed)//trim(adjustl(tmpstr))//'.smeared.nexafs',form='formatted')
   
     write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
     write(300,*) '# Smeared with lorentzian and gaussian broadening,', lwidth, gwidth, 'eV respectively'
@@ -414,7 +415,8 @@ program nexspec
   end do 
   
   write(*,*) 'Writing raw spectrum for orbital ', orb, 'with combined spins'
-  open(300,file=trim(seed)//'.smeared.nexafs',form='formatted')
+  tmpstr = '_orb'//trim(adjustl(atstr(2)))
+  open(300,file=trim(seed)//trim(adjustl(tmpstr))//'.smeared.nexafs',form='formatted')
 
   write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
   write(300,*) '# Smeared with lorentzian and gaussian broadening,', lwidth, gwidth, 'eV respectively'
