@@ -60,7 +60,7 @@ program aimspec
   logical :: file_exists = .false.
   integer :: nargs, ioerr, linecount, tmpi, i
   real(kind=dp) :: tmpf
-  character(len=80) :: datfile, tmpstr, atstr(2)
+  character(len=80) :: datfile, tmpstr, atstr(3)
   
   integer :: cproj, iminband, matsize
   integer :: nb, si, sj, nspins, nbands, iw, icmpt
@@ -228,8 +228,9 @@ program aimspec
       write(*,*) 'Writing raw spectrum for orbital ', cproj, 'spin transition: ', si, '->', sj
       write(atstr(1), '(I1)') si
       write(atstr(2), '(I1)') sj
-      tmpstr = trim(adjustl(atstr(1)))//trim(adjustl(atstr(2)))
-      open(300,file=trim(datfile)//'_spin'//trim(adjustl(tmpstr))//'.raw.nexafs',form='formatted')
+      write(atstr(3), '(I1)') cproj
+      tmpstr = '_orb'//trim(adjustl(atstr(3)))//'_spin'//trim(adjustl(atstr(1)))//trim(adjustl(atstr(2)))
+      open(300,file=trim(datfile)//trim(adjustl(tmpstr))//'.raw.nexafs',form='formatted')
   
       write(300,*) '# NEXAFS core-level spectrum calculated by aimspec with FHI-aims inputs.'
       write(300,*) '# Spin transition: ', si, '->', sj
