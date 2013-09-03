@@ -47,4 +47,7 @@ args = parser.parse_args()
 
 pdb = el.Atoms(args.inputfile, "pdb")
 
-pdb.writeAims(args.output)
+if pdb.lattice != []:
+  pdb.writeAims(args.output, xtype="frac")
+else:
+  pdb.writeAims(args.output, xtype="ang")
