@@ -1876,7 +1876,7 @@ class Atoms:
       data = [s.lower() for s in data]
       
       # Easy: just have to read through each line and look for "atom" lines
-      # or "lattice_vector" lines.
+      # or "lattice_vector" lines or "atom_frac" lines.
       pos = []
       spec = []
       lvec = []
@@ -1885,12 +1885,19 @@ class Atoms:
         if line.split()[0] == "atom":
           pos.append(array([float(x) for x in line.split()[1:4]]))
           spec.append(getElementZ(line.split()[4]))
+          is_atoms = True # sets a flag to help us later.
         elif line.split()[0] == "lattice_vector":
           lvec.append(array([float(x) for x in line.split()[1:4]]))
+        elif line.split()[0] == "atom_frac":
+          pos.append(array([float(x) for x in line.split()[1:4]]))
+          spec.append(getElementZ(line.split()[4]))
+          is_atoms = False
       
       # Ok bit of a bind here. For now, let's assume aims requires either
       # three lattice vectors or none. If there is less than three, we assume
-      # the coords are actually abs positions.
+      # the coords are actually abs positions. If there's 3 lattice vectors,
+      # we use the flag set up in the previous loop to decide whether we have
+      # atoms for atom_fracs (assume all the same).
       
       if len(lvec) < 3:
         self.positions.append(ang2bohr(pos))
@@ -1899,8 +1906,11 @@ class Atoms:
       else:
         lvec = ang2bohr(lvec)
         self.lattice.append(lvec)
-        pos = ang2bohr(pos)
-        self.positions.append(reduced2cart(pos, lvec))
+        if is_atoms:
+          pos = ang2bohr(pos)
+          self.positions.append(pos)
+        else:
+          self.positions.append(reduced2cart(pos, lvec))
         self.species.append(spec)
         self.is_crystal = True
       

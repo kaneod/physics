@@ -85,6 +85,7 @@ if not os.path.isdir(args.species):
 else:
   files = os.listdir(args.species)
   species = el.uniqify(geom.species[0])
+  print "Species to search for: ", species
   for spec_file in files:
     if int(spec_file.split("_")[0]) in species:
       os.system("cat %s >> control.in" % os.path.join(args.species, spec_file))
