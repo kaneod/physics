@@ -32,6 +32,8 @@ args = parser.parse_args()
 
 # Remove the energies file (since we want to repeatedly append to it) if it exists.
 subprocess.call(["rm", "energies.txt"])
+# and again for the seeds file.
+subprocess.call(["rm", "seeds.txt"])
 
 # Get our seedlist
 files = glob.glob("*.check")
@@ -41,7 +43,7 @@ for f in files:
   # Get the seed and run nexspec
   seed = f.split(".check")[0]
   print "Working with seed = %s" % seed
-  #subprocess.call("%s %s %s %s" % (nexspec, seed, args.projector, args.minband), shell=True)
+  subprocess.call("%s %s %s %s" % (nexspec, seed, args.projector, args.minband), shell=True)
   
   # Open the castep file associated with this seed and grab the species and relevant
   # energies
@@ -79,19 +81,23 @@ for f in files:
     ps_dict[si] = ei
   
   # Now write/append the energies. Note that for the species, we overwrite assuming that
-  # all are the same, for the energy we append instead.
+  # all are the same, for the energy we append instead. We also write the seed to a 
+  # file so we know what order this stuff was processed in.
   ef = open("energies.txt", 'a')
   sf = open("species.txt", 'w')
   cf = open("configurations.txt", 'w')
+  ff = open("seeds.txt", 'a')
   
   for k in ae_dict.keys():
     sf.write("%s %g %g\n" % (k, ae_dict[k], ps_dict[k]))
   
   for k in ae_dict.keys():
     cf.write("%s %s\n" %(k, config_dict[k]))
-    
+  
+  ff.write("%s\n" % seed)
   ef.write("%.15g\n" % total_energy)
   
+  ff.close()
   ef.close()
   sf.close()
   cf.close()
