@@ -70,7 +70,7 @@ elements = { 1 : "H", 2 : "He", 3 : "Li", 4 : "Be", 5 : "B", 6 : "C", 7 : "N", \
             98 : "Cf", 99 : "Es", 100 : "Fm", 101 : "Md", 102 : "No", 103 : "Lr", \
             104 : "Rf", 105 : "Db", 106 : "Sg", 107 : "Bh", 108 : "Hs", 109 : "Ds", \
             110 : "Ds", 111 : "Rg", 112 : "Uub", 113 : "Uut", 114 : "Uuq", 115 : "Uup", \
-            116 : "Uuh", 117 : "Uus", 118 : "Uuo" }
+            116 : "Uuh", 117 : "Uus", 118 : "Uuo", 0 : "UKN" }
             
 xsf_keywords = ["ANIMSTEPS", "CRYSTAL", "ATOMS", "PRIMVEC", "PRIMCOORD"]
 
@@ -143,7 +143,12 @@ def indexLine(text, substring, returnAll=False):
   
   """
   
+  if DEBUG:
+    print "Looking for string: ", substring
+    
   indices = [i for i,line in enumerate(text) if substring in line]
+  if DEBUG:
+    print "Found at: ", indices
   if returnAll:
     if len(indices) == 0:
       return None
