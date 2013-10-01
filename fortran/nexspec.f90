@@ -60,8 +60,9 @@ program nexspec
   real(kind=dp) :: w_start = -25.0 ! eV
   real(kind=dp) :: w_end = 65.0 ! eV
   real(kind=dp) :: w_step, w(spectrum_points)
-  real(kind=dp) :: gwidth = 0.4 ! eV
-  real(kind=dp) :: lwidth = 0.2 ! eV
+  real(kind=dp) :: gwidth = 0.05 ! eV
+  real(kind=dp) :: lwidth = 0.05 ! eV
+  real(kind=dp) :: linwidth = 0.1 ! wV
   
   ! File stuff
   logical :: file_exists = .false.
@@ -377,11 +378,12 @@ program nexspec
   end do
 
   close(300)
-  ! Write out a nominally-smeared (0.2 Lorentzian, 0.4 eV Gaussian, no linear) spectrum
+  ! Write out a nominally-smeared (0.05 Lorentzian, 0.05 eV Gaussian, 0.1 linear) spectrum
   
   do ns=1,nspins
     do icmpt=1,6
-      call lorentzian_convolute(w,spectrum(:,ns,icmpt),spectrum_points, lwidth)
+      call lorentzian_linear_convolute(w,spectrum(:,ns,icmpt),spectrum_points, &
+      & lwidth, linwidth)
       call gaussian_convolute(w,spectrum(:,ns,icmpt),spectrum_points, gwidth)
     end do
   end do
@@ -398,7 +400,8 @@ program nexspec
     open(300,file=trim(seed)//trim(adjustl(tmpstr))//'.smeared.nexafs',form='formatted')
   
     write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
-    write(300,*) '# Smeared with lorentzian and gaussian broadening,', lwidth, gwidth, 'eV respectively'
+    write(300,*) '# Smeared with lorentzian and gaussian broadening,', lwidth, &
+    & gwidth, 'eV respectively and linear broadening ', linwidth, 'eV.'
     write(300,*) '# Omega (eV) Mxx Myy Mzz Mxy Mxz Myz'
   
     do iw=1,spectrum_points
@@ -409,7 +412,8 @@ program nexspec
   end do
 
   do icmpt=1,6
-    call lorentzian_convolute(w,cspectrum(:,icmpt),spectrum_points, lwidth)
+    call lorentzian_linear_convolute(w,cspectrum(:,icmpt),spectrum_points, &
+    & lwidth, linwidth)
     call gaussian_convolute(w,cspectrum(:,icmpt),spectrum_points, gwidth)
   end do 
   
@@ -418,7 +422,8 @@ program nexspec
   open(300,file=trim(seed)//trim(adjustl(tmpstr))//'.smeared.nexafs',form='formatted')
 
   write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
-  write(300,*) '# Smeared with lorentzian and gaussian broadening,', lwidth, gwidth, 'eV respectively'
+  write(300,*) '# Smeared with lorentzian and gaussian broadening,', lwidth, &
+  & gwidth, 'eV respectively and linear broadening ', linwidth, 'eV.'
   write(300,*) '# Omega (eV) Mxx Myy Mzz Mxy Mxz Myz'
 
   do iw=1,spectrum_points
