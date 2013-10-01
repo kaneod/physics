@@ -294,12 +294,12 @@ program nexspec
     do nk=1,nkpts
       do nb=iminband,mbands
         
-        matrix_cmpt(1) = realpart(optmat(orb,nb,1,nk,ns) * dconjg(optmat(orb,nb,1,nk,ns)))
-        matrix_cmpt(2) = realpart(optmat(orb,nb,2,nk,ns) * dconjg(optmat(orb,nb,2,nk,ns)))
-        matrix_cmpt(3) = realpart(optmat(orb,nb,3,nk,ns) * dconjg(optmat(orb,nb,3,nk,ns)))
-        matrix_cmpt(4) = 2.0d0 * realpart(optmat(orb,nb,1,nk,ns) * dconjg(optmat(orb,nb,2,nk,ns)))
-        matrix_cmpt(5) = 2.0d0 * realpart(optmat(orb,nb,1,nk,ns) * dconjg(optmat(orb,nb,3,nk,ns)))
-        matrix_cmpt(6) = 2.0d0 * realpart(optmat(orb,nb,2,nk,ns) * dconjg(optmat(orb,nb,3,nk,ns)))
+        matrix_cmpt(1) = real(optmat(orb,nb,1,nk,ns) * conjg(optmat(orb,nb,1,nk,ns)))
+        matrix_cmpt(2) = real(optmat(orb,nb,2,nk,ns) * conjg(optmat(orb,nb,2,nk,ns)))
+        matrix_cmpt(3) = real(optmat(orb,nb,3,nk,ns) * conjg(optmat(orb,nb,3,nk,ns)))
+        matrix_cmpt(4) = 2.0d0 * real(optmat(orb,nb,1,nk,ns) * conjg(optmat(orb,nb,2,nk,ns)))
+        matrix_cmpt(5) = 2.0d0 * real(optmat(orb,nb,1,nk,ns) * conjg(optmat(orb,nb,3,nk,ns)))
+        matrix_cmpt(6) = 2.0d0 * real(optmat(orb,nb,2,nk,ns) * conjg(optmat(orb,nb,3,nk,ns)))
         
         ! If the user actually set a min band, use it as the zero of energy, otherwise
         ! zero the fermi level.
@@ -309,7 +309,6 @@ program nexspec
           e_nks = eigen(nb,nk,ns) - efermi(ns)
         end if
         
-        print *, matrix_cmpt(1), optmat(orb,nb,1,nk,ns)
         ! Occupancy weighting: we don't deal with this at all anymore - f_nks is always 1.
         f_nks = 1.0d0
         
