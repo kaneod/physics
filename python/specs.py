@@ -51,6 +51,7 @@
 from __future__ import division
 import xml.etree.ElementTree        # required by py2exe
 import xml.etree.cElementTree as ET
+from StringIO import StringIO
 from numpy import array, linspace, arange, zeros, ceil, amax, amin, argmax, argmin, abs
 from numpy import polyfit, polyval, seterr, trunc, mean
 from numpy.linalg import norm
@@ -79,13 +80,20 @@ class SPECS(object):
     def __init__(self, filename):
         """ Constructor, takes the xml file path. """
         
+        tree = ET.ElementTree()
+        
         try:
-          tree = ET.ElementTree(file=filename)
+          self.xmlroot = tree.parse(filename)
         except NameError:
           print "SPECS init error: could not open this file as an xml tree."
           return None
-           
-        self.xmlroot = tree.getroot()
+        except ET.ParseError:
+          # We probably need to decode from Windows cp1252 string encoding.
+          f = open(filename, 'r')
+          contents = f.readlines()
+          f.close()
+          contents = "".join(contents).decode("cp1252").encode("utf-8")
+          self.xmlroot = tree.parse(StringIO(contents))
 
         # The version impacts on properties of the document so we need to read it
         # here.
