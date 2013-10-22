@@ -40,11 +40,11 @@ from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin, exp, a
 from random import random as rand
 from numpy.linalg import norm, inv
 from numpy.fft import fftn, ifftn
-from scipy.interpolate import interp1d
-from scipy.integrate import quad
-from scipy.special import sph_harm
-from scipy.optimize import leastsq, curve_fit, fmin_slsqp
-from scipy.io import netcdf
+#from scipy.interpolate import interp1d
+#from scipy.integrate import quad
+#from scipy.special import sph_harm
+#from scipy.optimize import leastsq, curve_fit, fmin_slsqp
+#from scipy.io import netcdf
 import os
 
 # Debugging flag - set to 1 to see debug messages.
@@ -417,6 +417,11 @@ def castep_read_bands(filename):
     nelectrons = [float(x) for x in lines[2].split()[3:]]
     nbands = [int(x) for x in lines[3].split()[3:]]
     efermi = [float(x) for x in lines[4].split()[5:]]
+  lattice = []
+  lattice.append([float(x) for x in lines[6].split()])
+  lattice.append([float(x) for x in lines[7].split()])
+  lattice.append([float(x) for x in lines[8].split()])
+  lattice = array(lattice)
   data = lines[9:]
   
   bandsdict = {}
@@ -447,6 +452,7 @@ def castep_read_bands(filename):
   props["efermi"] = efermi
   props["nelectrons"] = nelectrons
   props["kpts"] = kptdict
+  props["lattice"] = lattice
   
   return bands, props
 
