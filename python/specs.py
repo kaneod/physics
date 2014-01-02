@@ -261,7 +261,7 @@ class SPECSRegion(object):
         # Multidetector systems"). Don't really need si or t.
         try:
             so = self.detector_channel_offsets[-1]
-        #si = self.detector_channel_offsets[0]
+            #si = self.detector_channel_offsets[0]
             h = int(trunc(so / self.scan_delta + 0.5))
         except IndexError:
             print "IndexError in unpacking: ", num_detectors
