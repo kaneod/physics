@@ -6,7 +6,7 @@
 # Converts a .pdb file to FHI-aims geometry.in format. Can optionally choose a 
 # filename, otherwise "geometry.in" is used.
 #
-# Usage: pdb2aims inputfile [-o outputFile]
+# Usage: pdb2aims [-r] inputfile [-o outputFile] [-s -z -t -f fixz]
 #
 ################################################################################
 #
@@ -29,25 +29,66 @@
 # 
 # NOTES
 #
-# 1. 
+# 1. For the extra options the assumption is that the pdb file only contains a 
+# cluster and not a periodic crystal. Bad things will happen if you break this
+# assumption.
+#
+# 2. The reverse switch simply takes an aims geometry.in and makes it a PDB again!
 #
 ################################################################################
 
 from __future__ import division
 import argparse
+import sys
 import esc_lib as el
+from numpy import array
 
 DEBUG=0
+REALLYBIGNEGATIVE=-1.0e6
 
 parser = argparse.ArgumentParser(description="Convert .pdb to FHI-aims geometry.in")
 
 parser.add_argument('inputfile', help="Input .pdb file.")
 parser.add_argument('-o', '--output', default="geometry.in", help="choose a name for your output file.")
+parser.add_argument('-s', '--sort', action="store_true", help="sort the positions in order of z coordinate, then y coordinate, then x coordinate.")
+parser.add_argument('-z', '--zero', action="store_true", help="Move everything so the smallest z value is 0 angstrom.")
+parser.add_argument('-f', '--fix', type=float, default=REALLYBIGNEGATIVE, help="Constrain movement of all atoms with z less than the specified value.") 
+parser.add_argument('-t', '--fixterminators', action="store_true", help="Constrain all the hydrogen atoms (assumed to be used as a cluster termination).")
+parser.add_argument('-r', '--reverse', action="store_true", help="Ignore all other flags and just convert the input file back to a PDB!")
 args = parser.parse_args()
 
+# If the -r switch is active, just read the geometry, write as a PDB and exit.
+if args.reverse:
+  print "Converting input file to PDB:"
+  geom = el.Atoms(args.inputfile, "aims,geometry")
+  geom.writePDB("new.pdb")
+  print "Done!"
+  sys.exit(0)
+  
 pdb = el.Atoms(args.inputfile, "pdb")
 
+options = {}
+
+if args.sort:
+  pdb.positions[0], pdb.species[0] = el.sortListPair(pdb.positions[0], pdb.species[0])
+
+if args.zero:
+  minz = min([v[2] for v in pdb.positions[0]])
+  dv = array([0, 0, minz])
+  pdb.positions[0] = [v - dv for v in pdb.positions[0]]
+
+if args.fix > REALLYBIGNEGATIVE:
+  constraints_list = []
+  for i,p in enumerate(pdb.positions[0]):
+    if p[2] < el.ang2bohr(args.fix):
+      constraints_list.append(i)
+  options["constrain atoms"] = constraints_list
+
+
+if args.fixterminators:
+  options["constrain species"] = ["H"]
+
 if pdb.lattice != []:
-  pdb.writeAims(args.output, xtype="frac")
+  pdb.writeAims(args.output, xtype="frac", opt=options)
 else:
-  pdb.writeAims(args.output, xtype="ang")
+  pdb.writeAims(args.output, xtype="ang", opt=options)
