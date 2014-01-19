@@ -36,8 +36,9 @@
 
 
 from __future__ import division
-from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin, exp, arange, arccos, arctan2, complex, polyfit, poly1d, loadtxt, amin, amax, argmin, argmax
+from numpy import array, zeros, sqrt, reshape, mat, pi, matrix, cos, sin, exp, arange, arccos, arctan2, complex, polyfit, poly1d, loadtxt, amin, amax, argmin, argmax, dot
 from random import random as rand
+from random import choice
 from numpy.linalg import norm, inv
 from numpy.fft import fftn, ifftn
 #from scipy.interpolate import interp1d
@@ -95,6 +96,64 @@ def getElementZ(elstr):
             for key, value in elements.items():
                 if elstr.title() == value:
                     return key
+                    
+def vectorAxisComparison(a, b):
+  """ result = vectorAxisComparison(a, b)
+  
+  For sorting lists of vectors. Two vectors are compared first by their z component, 
+  then their y component, then their x component. If a < b in this scheme, returns
+  a negative number. If a = b, returns 0. If a > b, returns positive number.
+  
+  """
+  
+  if a[2] - b[2]:
+    comp = a[2] - b[2]
+  elif a[1] - b[1]:
+    comp = a[1] - b[1]
+  elif a[0] - b[0]:
+    comp = a[0] - b[0]
+  else:
+    return 0
+  
+  if comp < 0:
+    return -1
+  else:
+    return 1
+    
+def sortListPair(a, b):
+  """ a_sorted, b_sorted = sortListPair(a, b)
+  
+  Sorts two lists of vectors a and b so that the mapping of a[i] to b[i] remains
+  the same even if the i changes.
+  
+  """
+  
+  if len(a) <= 1:
+    return a, b
+  else:
+    less_a = []
+    more_a = []
+    less_b = []
+    more_b = []
+    same_a = []
+    same_b = []
+    ipiv = choice(range(len(a)))
+    pivot = a[ipiv] 
+    for va, vb in zip(a,b):
+      cmp = vectorAxisComparison(va,pivot)
+      if cmp < 0:
+        less_a.append(va)
+        less_b.append(vb)
+      if cmp > 0:
+        more_a.append(va)
+        more_b.append(vb)
+      if cmp == 0:
+        same_a.append(va)
+        same_b.append(vb)
+    less_a, less_b = sortListPair(less_a, less_b)
+    more_a, more_b = sortListPair(more_a, more_b)
+    return more_a + same_a + less_a, more_b + same_b + less_b
+    
 
 def substringInList(substring, list):
   """ line = substringInList(substring, list)
@@ -142,13 +201,8 @@ def indexLine(text, substring, returnAll=False):
   substringPositionsInList (the other two are deprecated).
   
   """
-  
-  if DEBUG:
-    print "Looking for string: ", substring
     
   indices = [i for i,line in enumerate(text) if substring in line]
-  if DEBUG:
-    print "Found at: ", indices
   if returnAll:
     if len(indices) == 0:
       return None
@@ -1199,20 +1253,87 @@ def write_xsf(filename, positions, species, lattice=None, letter_spec=True):
         
     f.close()
     return True
+    
+def write_pdb(filename, positions, species, lattice=None, opt=None, timestep=0):
+  """ Write a PDB file.
+  
+  Some notes about compliance:
+  
+  1. Uses "ATOM" keyword for all atoms (never HETATM).
+  2. If a lattice is passed, this is written in ABC format to CRYST1 but the space
+  group is not calculated and is therefore void (by default P 1).
+  3. Does not include any bonding information.
+  
+  """
+  
+  pos = positions[timestep]
+  spec = species[timestep]
+  
+  pos = bohr2ang(pos)
+  print lattice
+  if lattice is not None and lattice != []:
+    avec = bohr2ang(lattice[timestep])
+    is_crystal = True
+  else:
+    is_crystal = False
+    
+  f = open(filename, 'w')
+  f.write("REMARK written by esc_lib.py (Kane O'Donnell, kaneod on GitHub)\n")
+  
+  if is_crystal:
+    # Get the lengths of the vectors and the angles between them.
+    a = norm(avec[0])
+    b = norm(avec[1])
+    c = norm(avec[2])
+    alpha = arccos(abs(dot(avec[0], avec[1]))/(a * b)) * 180 / pi
+    beta = arccos(abs(dot(avec[1], avec[2]))/(b * c)) * 180 / pi
+    gamma = arccos(abs(dot(avec[2], avec[0]))/(c * a)) * 180 / pi
+    
+    print "Found lengths and angles:"
+    print "%9.3f%9.3f%9.3f%7.2f%7.2f%7.2f" % (a, b, c, alpha, beta, gamma)
+    
+    f.write("CRYST1%9.3f%9.3f%9.3f%7.2f%7.2f%7.2fP 1           1\n" % (a, b, c, alpha, beta, gamma))
+    
+  for i, (p, s) in enumerate(zip(pos,spec)):
+    specname = elements[getElementZ(s)].center(4)
+    f.write("ATOM  %5d %s   X     1    %8.3f%8.3f%8.3f                      %s  \n" % \
+                  (i+1, specname, p[0],p[1],p[2],specname))
+  
+  f.write("END\n")
+  f.close()
+  return True
 
 def write_aims(filename, positions, species, lattice, xtype="ang", opt=None, timestep=0):
-  """ succeeded = write_aims(filename, positions, species, lattice, opt=None, timestep=0)
+  """ succeeded = write_aims(filename, positions, species, lattice, xtype="ang", opt=None, timestep=0)
 
     Writes a FHI-aims geometry.in file using the given positions, species and lattice. 
 
     FHI-aims allows either periodic or non-periodic boundary conditions. For periodic,
     specify xtype="frac" and provide lattice vectors. For non-periodic, specify xtype=
     "ang". No lattice vectors will be written in that case.
+    
+    opt is a dictionary where the key is the name of the option and the value is some
+    additional data. Options implemented so far are:
+    
+    "constrain atoms": value is a list of atomic indices to constrain.
+    
+    "constrain species": value is a list of species to constrain.
 
   """
 
   pos = positions[timestep]
   spec = species[timestep]
+  
+  if "constrain atoms" in opt.keys():
+    index_constraints = True
+  else:
+    index_constraints = False
+   
+  if "constrain species" in opt.keys():
+    species_constraints = True
+    constraint_list_species = [getElementZ(x) for x in opt["constrain species"]]
+  else:
+    species_constraints = False 
 
   if xtype == "frac":
     avec = lattice[timestep]
@@ -1227,8 +1348,14 @@ def write_aims(filename, positions, species, lattice, xtype="ang", opt=None, tim
   f = open(filename, 'w')
   f.write("# geometry.in written by esc_lib.py\n\n")
   if xtype == "ang":  
-    for s, p in zip(spec, pos):
+    for i in range(len(pos)):
+      p = pos[i]
+      s = spec[i]
       f.write("atom  %4.8g %4.8g %4.8g %s\n" % (p[0], p[1], p[2], elements[s]))
+      if index_constraints and i in opt["constrain atoms"]:
+        f.write("  constrain_relaxation .true.\n")
+      elif species_constraints and s in constraint_list_species:
+        f.write("  constrain_relaxation .true.\n")
   elif xtype == "frac":
     for l in avec:
       f.write("lattice_vector %4.8g %4.8g %4.8g\n" % (l[0], l[1], l[2]))
@@ -1236,7 +1363,10 @@ def write_aims(filename, positions, species, lattice, xtype="ang", opt=None, tim
     f.write("\n")
     for s, p in zip(spec, pos):
       f.write("atom_frac  %4.8g %4.8g %4.8g %s\n" % (p[0], p[1], p[2], elements[s]))
-  
+      if index_constraints and i in opt["constrain atoms"]:
+        f.write("  constrain_relaxation .true.\n")
+      elif species_constraints and s in constraint_list_species:
+        f.write("  constrain_relaxation .true.\n")
   f.close()
 
   return True
@@ -2581,8 +2711,8 @@ class Atoms:
       return spec_idx
         
     
-    def generateConstraints(self, constrained_atoms):
-      """ text_constraints = Atoms.generateConstraints(constrained_atoms)
+    def generateCASTEPConstraints(self, constrained_atoms):
+      """ text_constraints = Atoms.generateCASTEPConstraints(constrained_atoms)
       
       Generates the %BLOCK IONIC_CONSTRAINTS text to fix the listed atoms and 
       returns the text. That's all. CASTEP-style constraints. Note that the
@@ -2645,7 +2775,20 @@ class Atoms:
       """
 
       return write_aims(filename, self.positions, self.species, self.lattice, xtype, opt, timestep)
-  
+    
+    def writePDB(self, filename, opt=None, timestep=0):
+      """ Write this Atoms object to a PDB file.
+      
+      No options are implemented as yet.
+      
+      """
+      
+      if self.is_crystal:
+        return write_pdb(filename, self.positions, self.species, self.lattice, opt, timestep)
+      else:
+        return write_pdb(filename, self.positions, self.species, opt=opt, timestep=timestep)
+      
+      
     def writeXYZ(self, filename):
       """ success = Atoms.writeXYZ(filename)
       
