@@ -196,8 +196,9 @@ def normsort(vectors):
   else:
     less = []
     more = []
+    same = []
     pivot = choice(vectors)
-    same = [pivot]
+    #same = [pivot]
     np = norm(pivot)
     for v in vectors:
       nv = norm(v)
@@ -397,7 +398,7 @@ if __name__ == '__main__':
   if is_cluster:
     f = open("new_cluster.xyz", 'w')
     f.write(str(len(unique_positions)+len(term_positions)) + "\n")
-    f.write("TEST OUTPUT\n")
+    f.write(" ".join(sys.argv)+"\n")
     for p in unique_positions:
       f.write("C    %.6g    %.6g    %.6g\n" % (p[0], p[1], p[2]))
     for t in term_positions:
@@ -405,6 +406,8 @@ if __name__ == '__main__':
     f.close()
   else:
     f = open("new_crystal.xsf", 'w')
+    f.write("# slabgen.py called as:\n")
+    f.write(" ".join(sys.argv)+"\n")
     f.write("CRYSTAL\n")
     f.write("PRIMVEC\n")
     for v in [Sx, Sy, Sz]:
@@ -421,7 +424,8 @@ if __name__ == '__main__':
   # Write FHI-aims geometry.in file if cluster, along with constraints.
   if is_cluster:
     f = open("geometry.in", 'w')
-    f.write("# Written by slabgen.py.\n")
+    f.write("# slabgen.py called as:\n")
+    f.write(" ".join(sys.argv)+"\n")
     for i, p in enumerate(unique_positions):
       f.write("atom    %.6g    %.6g    %.6g    C\n" % (p[0], p[1], p[2]))
       if i in terminated_indices:
