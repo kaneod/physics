@@ -1263,6 +1263,7 @@ def write_pdb(filename, positions, species, lattice=None, opt=None, timestep=0):
   2. If a lattice is passed, this is written in ABC format to CRYST1 but the space
   group is not calculated and is therefore void (by default P 1).
   3. Does not include any bonding information.
+  4. There is a rotational ambiguity going from cartesian to abc lattice format. Due to this, positions have to be re-calculated here because the PDB format only accepts absolute positions not fractional relative to the abc basis.
   
   """
   
@@ -1282,22 +1283,25 @@ def write_pdb(filename, positions, species, lattice=None, opt=None, timestep=0):
   
   if is_crystal:
     # Get the lengths of the vectors and the angles between them.
-    a = norm(avec[0])
-    b = norm(avec[1])
-    c = norm(avec[2])
-    alpha = arccos(abs(dot(avec[0], avec[1]))/(a * b)) * 180 / pi
-    beta = arccos(abs(dot(avec[1], avec[2]))/(b * c)) * 180 / pi
-    gamma = arccos(abs(dot(avec[2], avec[0]))/(c * a)) * 180 / pi
+    a, b, c, alpha, beta, gamma = cell2abc(avec)
+    
+    # Convert these back to a new set of vectors so we can re-express the positions.
+    lvec = abc2cell(array([a,b,c]), array([alpha, beta, gamma]))
+    
+    # First convert to fractional in the old basis
+    pos = cart2reduced(pos, avec)
+    # Now convert to cartesian in the new basis.
+    pos = reduced2cart(pos, lvec)
     
     print "Found lengths and angles:"
     print "%9.3f%9.3f%9.3f%7.2f%7.2f%7.2f" % (a, b, c, alpha, beta, gamma)
     
-    f.write("CRYST1%9.3f%9.3f%9.3f%7.2f%7.2f%7.2fP 1           1\n" % (a, b, c, alpha, beta, gamma))
+    f.write("CRYST1%9.3f%9.3f%9.3f%7.2f%7.2f%7.2f P 1            1\n" % (a, b, c, alpha, beta, gamma))
     
   for i, (p, s) in enumerate(zip(pos,spec)):
-    specname = elements[getElementZ(s)].center(4)
-    f.write("ATOM  %5d %s   X     1    %8.3f%8.3f%8.3f                      %s  \n" % \
-                  (i+1, specname, p[0],p[1],p[2],specname))
+    specname = elements[s].rjust(2)
+    f.write("ATOM  %5d %s     X     1    %8.3f%8.3f%8.3f                      %s  \n" % \
+                  (i+1, specname.upper(), p[0],p[1],p[2],specname))
   
   f.write("END\n")
   f.close()
@@ -1629,6 +1633,37 @@ def g_vectors(bvec, ngrid):
   
   return array(gvs), [gcx, gcy, gcz], biggest
   
+def abc2cell(lengths, angles):
+  """ Convert a lattice from a,b,c,alpha,beta,gamma to three cartesian vectors."""
+  
+  lvec = []
+  angles *= pi/180.0
+  lvec.append(array([lengths[0], 0.0, 0.0])) # "a"
+  lvec.append(array([lengths[1] * cos(angles[2]), lengths[1] * sin(angles[2]), 0.0]))
+  ca = lengths[2] * cos(angles[1])
+  cb = lengths[2] * (cos(angles[0]) - cos(angles[1]) * cos(angles[2])) / sin(angles[2])
+  cc = sqrt(lengths[2] ** 2 - ca ** 2 - cb ** 2)
+  lvec.append(array([ca, cb, cc]))
+  
+  return lvec
+  
+def cell2abc(lvec):
+  """ Convert cartesian vectors to length/angle format. 
+  
+  Note that there is ambiguity in the length/angle format and you might need to re-express
+  any atomic positions to avoid them being shifted outside the cell.
+  
+  """
+  
+  a = norm(lvec[0])
+  b = norm(lvec[1])
+  c = norm(lvec[2])
+  gamma = arccos(dot(lvec[0], lvec[1])/(a * b)) * 180 / pi
+  alpha = arccos(dot(lvec[1], lvec[2])/(b * c)) * 180 / pi
+  beta = arccos(dot(lvec[2], lvec[0])/(c * a)) * 180 / pi
+  
+  return a, b, c, alpha, beta, gamma
+  
 def cart2reduced(position, lattice):
     """ reduced = cart2reduced(position, lattice)
     
@@ -1891,13 +1926,8 @@ class Atoms:
         lvec = []
         lengths = array([float(x) for x in data[crys].split()[1:4]])
         angles = array([float(x) for x in data[crys].split()[4:7]])
-        angles *= pi/180.0
-        lvec.append(array([lengths[0], 0.0, 0.0])) # "a"
-        lvec.append(array([lengths[1] * cos(angles[2]), lengths[1] * sin(angles[2]), 0.0]))
-        ca = lengths[2] * cos(angles[1])
-        cb = lengths[2] * (cos(angles[0]) - cos(angles[1]) * cos(angles[2])) / sin(angles[2])
-        cc = sqrt(lengths[2] ** 2 - ca ** 2 - cb ** 2)
-        lvec.append(array([ca, cb, cc]))
+        lvec = abc2cell(lengths, angles)
+        
         self.is_crystal = True
         if num_models is not None:
           self.lattice.append(num_models * ang2bohr(lvec))
