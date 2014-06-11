@@ -2723,7 +2723,7 @@ class Atoms:
       return my_order
       
     def listSpecies(self,spec):
-      """ spec_idx = Atoms.printSpecies(spec)
+      """ spec_idx = Atoms.listSpecies(spec)
       
       Returns a list of indices of all atoms of type spec. Spec can be given
       as a Z number or an abbreviation (H, Mg, Ca, etc). Note these are zero-
@@ -2739,7 +2739,25 @@ class Atoms:
           spec_idx.append(i)
           
       return spec_idx
-        
+      
+    def ionIndex(self, abs_index):
+      """ index = Atoms.ionIndex(abs_index)
+      
+      Given the absolute index of an atom, get the species and then determine the
+      ion index - the index relative that particular species. Useful for generating
+      CASTEP constraints.
+      
+      """
+      
+      thisspec = self.species[0][abs_index]
+      
+      count = 0
+      
+      for i, spec in enumerate(self.species[0]):
+        if i == abs_index:
+          return count
+        elif spec == thisspec:
+          count += 1 
     
     def generateCASTEPConstraints(self, constrained_atoms):
       """ text_constraints = Atoms.generateCASTEPConstraints(constrained_atoms)
@@ -2748,8 +2766,7 @@ class Atoms:
       returns the text. That's all. CASTEP-style constraints. Note that the
       timestep is irrelevant here so we always take from timestep 0.
       
-      The list of constrained atoms is 1-based, not 0-based, to match with
-      the style used in CASTEP.
+      The list of constrained atoms is ZERO-BASED!
       
       """
       
@@ -2757,13 +2774,11 @@ class Atoms:
       count = 0
       
       for i in constrained_atoms:
-        spec = elements[self.species[0][i-1]] # i-1, not i, because 1-based.
-        # To find the ion number, we count from the first occurrence of the same
-        # species.
-        ion = i - self.species[0].index(self.species[0][i-1])
-        text_constraints.append("  %d  %s  %d 1.0 0.0 0.0" % (count+1, spec, ion))
-        text_constraints.append("  %d  %s  %d 0.0 1.0 0.0" % (count+2, spec, ion))
-        text_constraints.append("  %d  %s  %d 0.0 0.0 1.0" % (count+3, spec, ion))
+        spec = elements[self.species[0][i]]
+        ion = self.ionIndex(i)
+        text_constraints.append("  %d  %s  %d 1.0 0.0 0.0" % (count+1, spec, ion + 1))
+        text_constraints.append("  %d  %s  %d 0.0 1.0 0.0" % (count+2, spec, ion + 1))
+        text_constraints.append("  %d  %s  %d 0.0 0.0 1.0" % (count+3, spec, ion + 1))
         count += 3
       
       text_constraints.append("%endblock ionic_constraints")
