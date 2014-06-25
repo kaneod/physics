@@ -36,12 +36,12 @@ subprocess.call(["rm", "energies.txt"])
 subprocess.call(["rm", "seeds.txt"])
 
 # Get our seedlist
-files = glob.glob("*.check")
+files = glob.glob("*.castep")
 
 for f in files:
   
   # Get the seed and run nexspec
-  seed = f.split(".check")[0]
+  seed = f.split(".castep")[0]
   print "Working with seed = %s" % seed
   subprocess.call("%s %s %s %s" % (nexspec, seed, args.projector, args.minband), shell=True)
   
