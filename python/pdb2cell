@@ -1,0 +1,65 @@
+#!/usr/bin/env python
+################################################################################
+#
+# pdb2cell
+#
+# Converts a .pdb file to CASTEP .cell format. Can optionally choose a 
+# filename, otherwise "new.cell" is used.
+#
+# Usage: pdb2cell inputfile [-u units -o outputFile]
+#
+################################################################################
+#
+# Copyright 2013 Kane O'Donnell
+#
+#     This library is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This library is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this library.  If not, see <http://www.gnu.org/licenses/>.
+#
+################################################################################
+# 
+# NOTES
+#
+# 1. Works a lot like pdb2aims, but CASTEP doesn't support free boundaries.
+#    Hence, if there is no lattice, we print a warning. To get absolute output
+#    instead of fractional, there's an additional option (-u, --units) that
+#    can take "frac" or "ang".
+#
+################################################################################
+
+from __future__ import division
+import argparse
+import esc_lib as el
+from numpy import array
+
+DEBUG=0
+
+parser = argparse.ArgumentParser(description="Convert .pdb to CASTEP .cell")
+
+parser.add_argument('inputfile', help="Input .pdb file.")
+parser.add_argument('-u', '--units', default="frac", help="Units for atomic positions - choose frac or ang.")
+parser.add_argument('-o', '--output', default="new.cell", help="Choose a name for your output file.")
+args = parser.parse_args()
+
+pdb = el.Atoms(args.inputfile, "pdb")
+
+if pdb.lattice != []:
+  pdb.writeCastep(args.output, xtype=args.units)
+else:
+  print "WARNING: No crystal lattice is specified in this pdb file. I'm inventing a bogus one for you - you must change it in the final .cell file!"
+  lvec = []
+  lvec.append(array([1.0, 0.0, 0.0]))
+  lvec.append(array([0.0, 1.0, 0.0]))
+  lvec.append(array([0.0, 0.0, 1.0]))
+  
+  pdb.lattice.append(lvec)
+  pdb.writeCastep(args.output, xtype="ang")
