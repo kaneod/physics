@@ -365,72 +365,72 @@ program nexspec
     close(300)
   end do
 
-  write(*,*) 'Writing raw spectrum for orbital ', orb, 'with combined spins'
-  tmpstr = '_orb'//trim(adjustl(atstr(2)))
-  open(300,file=trim(seed)//trim(adjustl(tmpstr))//'.raw.nexafs',form='formatted')
+  !write(*,*) 'Writing raw spectrum for orbital ', orb, 'with combined spins'
+  !tmpstr = '_orb'//trim(adjustl(atstr(2)))
+  !open(300,file=trim(seed)//trim(adjustl(tmpstr))//'.raw.nexafs',form='formatted')
 
-  write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
-  write(300,*) '#'
-  write(300,*) '# Omega (eV) Mxx Myy Mzz Mxy Mxz Myz'
+  !write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
+  !write(300,*) '#'
+  !write(300,*) '# Omega (eV) Mxx Myy Mzz Mxy Mxz Myz'
 
-  do iw=1,spectrum_points
-    write(300, '(7g16.8)') w(iw), cspectrum(iw,1:6)
-  end do
+  !do iw=1,spectrum_points
+  !  write(300, '(7g16.8)') w(iw), cspectrum(iw,1:6)
+  !end do
 
-  close(300)
-  ! Write out a nominally-smeared (0.05 Lorentzian, 0.05 eV Gaussian, 0.1 linear) spectrum
+  !close(300)
+  !! Write out a nominally-smeared (0.05 Lorentzian, 0.05 eV Gaussian, 0.1 linear) spectrum
   
-  do ns=1,nspins
-    do icmpt=1,6
-      call lorentzian_linear_convolute(w,spectrum(:,ns,icmpt),spectrum_points, &
-      & lwidth, linwidth)
-      call gaussian_convolute(w,spectrum(:,ns,icmpt),spectrum_points, gwidth)
-    end do
-  end do
+  !do ns=1,nspins
+  !  do icmpt=1,6
+  !    call lorentzian_linear_convolute(w,spectrum(:,ns,icmpt),spectrum_points, &
+  !    & lwidth, linwidth)
+  !    call gaussian_convolute(w,spectrum(:,ns,icmpt),spectrum_points, gwidth)
+  !  end do
+  !end do
 
-  do ns=1,nspins  
-    write(*,*) 'Writing smeared spectrum for orbital ', orb, 'spin ', ns
-    write(atstr(1), '(I4)') ns
-    write(atstr(2), '(I4)') orb
-    !write(atstr(3), '(I4)') core_n(orb)
-    !write(atstr(4), '(I4)') core_lm(orb)
-    !tmpstr = trim(adjustl(atstr(1)))//'_'//trim(adjustl(atstr(2)))//'_'//trim(adjustl(atstr(3)))//'_'&
-  !&             //trim(adjustl(atstr(4)))
-    tmpstr = '_orb'//trim(adjustl(atstr(2)))//'_spin'//trim(adjustl(atstr(1)))
-    open(300,file=trim(seed)//trim(adjustl(tmpstr))//'.smeared.nexafs',form='formatted')
+  !do ns=1,nspins  
+  !  write(*,*) 'Writing smeared spectrum for orbital ', orb, 'spin ', ns
+  !  write(atstr(1), '(I4)') ns
+  !  write(atstr(2), '(I4)') orb
+  !  !write(atstr(3), '(I4)') core_n(orb)
+  !  !write(atstr(4), '(I4)') core_lm(orb)
+  !  !tmpstr = trim(adjustl(atstr(1)))//'_'//trim(adjustl(atstr(2)))//'_'//trim(adjustl(atstr(3)))//'_'&
+  !!&             //trim(adjustl(atstr(4)))
+  !  tmpstr = '_orb'//trim(adjustl(atstr(2)))//'_spin'//trim(adjustl(atstr(1)))
+  !  open(300,file=trim(seed)//trim(adjustl(tmpstr))//'.smeared.nexafs',form='formatted')
+ ! 
+  !  write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
+  !  write(300,*) '# Smeared with lorentzian and gaussian broadening,', lwidth, &
+  !  & gwidth, 'eV respectively and linear broadening ', linwidth, 'eV.'
+  !  write(300,*) '# Omega (eV) Mxx Myy Mzz Mxy Mxz Myz'
   
-    write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
-    write(300,*) '# Smeared with lorentzian and gaussian broadening,', lwidth, &
-    & gwidth, 'eV respectively and linear broadening ', linwidth, 'eV.'
-    write(300,*) '# Omega (eV) Mxx Myy Mzz Mxy Mxz Myz'
+  !  do iw=1,spectrum_points
+  !    write(300, '(7g16.8)') w(iw), spectrum(iw,ns,1:6)
+  !  end do
   
-    do iw=1,spectrum_points
-      write(300, '(7g16.8)') w(iw), spectrum(iw,ns,1:6)
-    end do
+  !  close(300)
+  !end do
+
+  !do icmpt=1,6
+  !  call lorentzian_linear_convolute(w,cspectrum(:,icmpt),spectrum_points, &
+  !  & lwidth, linwidth)
+  !  call gaussian_convolute(w,cspectrum(:,icmpt),spectrum_points, gwidth)
+  !end do 
   
-    close(300)
-  end do
+  !write(*,*) 'Writing raw spectrum for orbital ', orb, 'with combined spins'
+  !tmpstr = '_orb'//trim(adjustl(atstr(2)))
+  !open(300,file=trim(seed)//trim(adjustl(tmpstr))//'.smeared.nexafs',form='formatted')
 
-  do icmpt=1,6
-    call lorentzian_linear_convolute(w,cspectrum(:,icmpt),spectrum_points, &
-    & lwidth, linwidth)
-    call gaussian_convolute(w,cspectrum(:,icmpt),spectrum_points, gwidth)
-  end do 
-  
-  write(*,*) 'Writing raw spectrum for orbital ', orb, 'with combined spins'
-  tmpstr = '_orb'//trim(adjustl(atstr(2)))
-  open(300,file=trim(seed)//trim(adjustl(tmpstr))//'.smeared.nexafs',form='formatted')
+  !write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
+  !write(300,*) '# Smeared with lorentzian and gaussian broadening,', lwidth, &
+  !& gwidth, 'eV respectively and linear broadening ', linwidth, 'eV.'
+  !write(300,*) '# Omega (eV) Mxx Myy Mzz Mxy Mxz Myz'
 
-  write(300,*) '# NEXAFS core-level spectrum calculated by nexspec with CASTEP inputs.'
-  write(300,*) '# Smeared with lorentzian and gaussian broadening,', lwidth, &
-  & gwidth, 'eV respectively and linear broadening ', linwidth, 'eV.'
-  write(300,*) '# Omega (eV) Mxx Myy Mzz Mxy Mxz Myz'
+  !do iw=1,spectrum_points
+  !  write(300, '(7g16.8)') w(iw), cspectrum(iw,1:6)
+  !end do
 
-  do iw=1,spectrum_points
-    write(300, '(7g16.8)') w(iw), cspectrum(iw,1:6)
-  end do
-
-  close(300)
+  !close(300)
   
   ! Deallocate everything
   deallocate(spectrum)
