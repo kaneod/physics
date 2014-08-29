@@ -55,6 +55,7 @@ parser.add_argument('-z', '--zero', action="store_true", help="Move everything s
 parser.add_argument('-f', '--fix', type=float, default=REALLYBIGNEGATIVE, help="Constrain movement of all atoms with z less than the specified value.") 
 parser.add_argument('-t', '--fixterminators', action="store_true", help="Constrain all the hydrogen atoms (assumed to be used as a cluster termination).")
 parser.add_argument('-r', '--reverse', action="store_true", help="Ignore all other flags and just convert the input file back to a PDB!")
+parser.add_argument('-a', '--absolute', action="store_true", help="Force absolute coordinate output without a lattice even if the .pdb contains one.")
 args = parser.parse_args()
 
 # If the -r switch is active, just read the geometry, write as a PDB and exit.
@@ -88,7 +89,7 @@ if args.fix > REALLYBIGNEGATIVE:
 if args.fixterminators:
   options["constrain species"] = ["H"]
 
-if pdb.lattice != []:
+if pdb.lattice != [] and not args.absolute:
   pdb.writeAims(args.output, xtype="frac", opt=options)
 else:
   pdb.writeAims(args.output, xtype="ang", opt=options)
