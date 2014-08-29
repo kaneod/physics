@@ -25,7 +25,11 @@
 # 
 # NOTES
 #
-# 1. 
+# 1. Yes, a lot of this stuff could have been made easier with NumPy. I've tried
+# to avoid it so people can use this code with stock python.
+# 
+# 2. We implicitly assume here that any kinetic scale is given with respect to
+# the Fermi level, not the vacuum level at the spectrometer. 
 #
 ################################################################################
 
@@ -136,9 +140,13 @@ class VAMASBlock:
 		 		'content' should be an iterator containing lines of text. """
 		
 		self.LoadFromIterator(header, content)
+		if header.scan_mode == "REGULAR":
+			self.MakeAxes()
+		self.ReorderOrdinates()
 	
 	def LoadFromIterator(self, header, content):
 	
+		self.header = header # So we always have a link back to the header data.
 		self.name = next(content).strip()
 		self.sample = next(content).strip()
 		self.year = int(next(content))
@@ -270,5 +278,50 @@ class VAMASBlock:
 		self.ordinates = []
 		for i in range(self.num_ordinate_values):
 			self.ordinates.append(float(next(content)))
+	
+	def MakeAxes(self):
+		""" Uses the abscissa data to construct binding energy and kinetic energy labels """
+		
+		# So, the VAMAS file provides the number of ordinate values which is a multiple of the number of corresponding variables with number of ordinates for each variable. 
+		# We also have the abscissa start and the increment. We can use this to generate a generic energy axis. 
+		# On top of that, we can use the abscissa label to guess whether the abscissa is kinetic or binding (for electron spectroscopy) and then generate the other one using the photon energy and work function.
+		
+		# Note we have __future__ division here but we're explicitly casting just in 
+		# case someone messes with the source code. Int division paranoia!
+		num_ords = int(float(self.num_ordinate_values) / float(self.num_corresponding_variables))
+		
+		self.axis = []
+		for i in range(num_ords):
+			self.axis.append(self.abscissa_start + i * self.abscissa_increment)
+		
+		# Now, is the word kinetic in the label?
+		if "kinetic" in self.abscissa_label.lower():
+			self.kinetic_axis = []
+			self.binding_axis = []
+			for i in range(num_ords):
+				self.kinetic_axis.append(self.abscissa_start + i * self.abscissa_increment)
+				self.binding_axis.append(-1*(self.abscissa_start + i * self.abscissa_increment) + self.source_energy)
+		elif "binding" in self.abscissa_label.lower():
+			self.kinetic_axis = []
+			self.binding_axis = []
+			for i in range(num_ords):
+				self.binding_axis.append(self.abscissa_start + i * self.abscissa_increment)
+				self.kinetic_axis.append(-1 * (self.abscissa_start + i * self.abscissa_increment) + self.source_energy)		
+				
+		# As a last item, calculate the dwell time per set of corresponding variables.
+		self.dwell_time = float(num_ords) / self.signal_collection_time
+		
+	def ReorderOrdinates(self):
+		""" Creates a list of lists by reordering the ordinate values. In the VAMAS file if there are N corresponding variables, the ordinates are listed as 1_1, .... 1_N, 2_1, .... , 2_N, etc where for each abscissa value all the corresponding values are listed in sequence. ReorderOrdinates creates a list [[1_1, 2_1, ...], ... , [1_N, 2_N, ...]], i.e. a list each for all the corresponding variables. """
+		
+		num_ords = int(float(self.num_ordinate_values) / float(self.num_corresponding_variables))
+		
+		self.data = []
+		
+		for i in range(self.num_corresponding_variables):
+			tmp = []
+			for j in range(i, self.num_ordinate_values, self.num_corresponding_variables):
+				tmp.append(self.ordinates[j])
+			self.data.append(tmp)
 		
 		
