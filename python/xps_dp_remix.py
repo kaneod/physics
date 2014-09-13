@@ -41,6 +41,7 @@ import sys
 from numpy import *
 from numpy.linalg import *
 from numpy import __version__ as npyversion
+from scipy.optimize import nnls
 
 parser = argparse.ArgumentParser(description="Turn an elemental depth profile into a materials one.")
 
@@ -49,8 +50,10 @@ args = parser.parse_args()
 
 # First open the inputfile and grab the column headers on line 3.
 f = open(args.inputfile, 'r')
-headers = f.readlines()[2]
+lines = f.readlines()
+headers = lines[2]
 headers = headers.split('\t')[:-1]
+f.close()
 
 # Now display a list of the headers to the user.
 print ""
@@ -132,12 +135,18 @@ sc_matrix = matrix(sc_matrix)
 
 compound_matrix = zeros((elemental.shape[0], len(compounds.split())))
 for i in range(elemental.shape[0]):
-	tempS = matrix(elemental_matrix[i,:]).T
-	tempC = sc_matrix.I * tempS
-	compound_matrix[i,:] = array(tempC).reshape(-1,)
+	#tempS = matrix(elemental_matrix[i,:]).T
+	#tempC = sc_matrix.I * tempS
+	#compound_matrix[i,:] = array(tempC).reshape(-1,)
 	# Normalize to 100% by row
 	#compound_matrix[i,:] = 100 * compound_matrix[i,:] / sum(compound_matrix[i,:])
 	# Note: We don't normalize here because small values of the sum make it look ridiculous.
+	
+	# The above code does things directly. The following code uses the scipy.optimize nnls method
+	# to ensure the solution is positive definition in a component-wise sense. 
+	residual = 0
+	compound_matrix[i,:],residual = nnls(sc_matrix, elemental_matrix[i,:])
+	print "Residual for etch step %d is %f." %(i, residual)
 
 # Done! Write to file.
 output_matrix = zeros((compound_matrix.shape[0], compound_matrix.shape[1]+1))
