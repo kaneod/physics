@@ -308,7 +308,7 @@ if __name__ == '__main__':
   z = getElementZ(args.Z)
   
   # Sanity check on inputs
-  if n < 1:
+  if n < 0:
     print "ERROR: It looks like you've specified a negative number for the atomic index. Try again. Exiting..."
     exit(0)
   if z == 0:
