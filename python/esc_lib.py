@@ -1254,7 +1254,69 @@ def write_xsf(filename, positions, species, lattice=None, letter_spec=True):
     f.close()
     return True
     
-def write_pdb(filename, positions, species, lattice=None, opt=None, timestep=0):
+def write_qe(filename, positions, species, lattice=None, xtype="ang", opt=None, timestep=0):
+  """ Write a Quantum Espresso input file.
+  
+  Specify xtype="frac" for crystal coordinates, or "bohr" for both the lattice and positions to
+  be given in Hartree atomic units.
+  
+  """
+  
+  pos = positions[timestep]
+  spec = species[timestep]
+  avec = lattice[timestep]
+  
+  if xtype == "frac":
+    pos = cart2reduced(pos, avec)
+    avec = bohr2ang(avec)
+  elif xtype == "ang":
+    pos = bohr2ang(pos)
+    avec = bohr2ang(avec)
+  
+    
+  f = open(filename, 'w')
+  # Write some simple blank info for the cards and namelists.
+  f.write("&CONTROL\n")
+  f.write("  calculation = 'scf',\n  title = '',\n  outdir = './',\n")
+  f.write("  prefix = 'pwscf',\n  !force_conv_thr = 0.05,\n")
+  f.write("  !pseudo_dir = './'\n/\n")
+  f.write("&SYSTEM\n")
+  f.write("  ibrav = 0,\n  nat = %d,\n  ntyp = %d,\n" % (len(spec), len(uniqify(spec))))
+  f.write("  !nbnd = ###,\n")
+  f.write("  ecutwfc = 75,\n  ecutrho = 600,\n")
+  f.write("  occupations = 'smearing',\n  degauss = 0.02,\n")
+  f.write("  nspin = 1\n/\n")
+  f.write("&ELECTRONS\n")
+  f.write("  conv_thr = 1.0D-7,\n/\n")
+  f.write("!&IONS\n")
+  f.write("!/\n")
+  f.write("ATOMIC_SPECIES\n")
+  for s in uniqify(spec):
+    f.write("  %s  1.0  PSEUDO.UPF\n" % (elements[s]))
+  
+  if xtype == "ang" or xtype == "frac":
+    f.write("CELL_PARAMETERS angstrom\n")
+  else:
+    f.write("CELL_PARAMETERS bohr\n")
+  for v in avec:
+      f.write("  %g %g %g\n" % (v[0], v[1], v[2]))
+  f.write("K_POINTS automatic\n")
+  f.write("  1 1 1 0 0 0\n")
+  
+  if xtype == "ang":
+    f.write("ATOMIC_POSITIONS angstrom\n")
+  elif xtype == "frac":
+    f.write("ATOMIC_POSITIONS crystal\n")
+  else:
+    f.write("ATOMIC_POSITIONS bohr\n")
+  for s, p in zip(spec, pos):
+    f.write("  %s %g %g %g\n" % (elements[s], p[0], p[1], p[2]))
+      
+  f.close()
+  return True
+  
+    
+def write_pdb(filename, positions, species, lattice=None, opt=None):
   """ Write a PDB file.
   
   Some notes about compliance:
@@ -1842,6 +1904,8 @@ class Atoms:
         
         "pdb" : Protein Data Bank format.
         
+        "qe,input" : Quantum Espresso input file.
+        
         """
         
         if filetype == "XSF":
@@ -1871,7 +1935,9 @@ class Atoms:
         else:
           print "(esc_lib.Atoms.__init__) ERROR: File type %s not handled at present." % filetype
           return None
-  
+  		
+  		
+      
     def loadFromPDB(self, filename):
       """ atoms = Atoms.loadFromPDB(filename)
       
@@ -2811,6 +2877,15 @@ class Atoms:
       """
       
       return write_castep(filename, self.positions, self.species, self.lattice, xtype, opt, timestep)  
+      
+    def writeQEInput(self, filename, xtype="ang", opt=None, timestep=0):
+      """ success = Atoms.writeQEInput(filename, xtype="ang", opt=None, timestep=0)
+      
+      Member function wrapper for esc_lib.write_qe.
+      
+      """
+      
+      return write_qe(filename, self.positions, self.species, self.lattice, xtype, opt, timestep)
 
     def writeAims(self, filename, xtype="ang", opt=None, timestep=0):
       """ success = Atoms.writeAims(filename, xtype="ang", opt=None, timestep=0)
