@@ -232,7 +232,7 @@ def eV2rydberg(eV):
     if type(eV) == type([]):
         return [eV2rydberg(x) for x in eV]
     else:
-        return eV / 13.6
+        return eV / 13.605698066
     
 def rydberg2eV(rydberg):
     """ eV = rydberg2eV(rydberg)
@@ -244,7 +244,7 @@ def rydberg2eV(rydberg):
     if type(rydberg) == type([]):
         return [rydberg2eV(x) for x in rydberg]
     else:
-        return rydberg * 13.6
+        return rydberg * 13.605698066
         
 def uniqify(sequence, trans=None):
     """ unique = uniqify(sequence, trans)
@@ -470,7 +470,7 @@ class Atoms:
         if units == "bohr":
           self.positions = bohr2ang(self.positions)
         elif units == "alat":
-          self.positions = reduced2cart(self.positions)
+          self.positions = reduced2cart(self.positions, self.lattice)
       elif k == "atomic_species":
         i = blocks[k]
         tmp = []
@@ -521,6 +521,8 @@ class Atoms:
         is set to QE, we use the parameters dictionary to fill out the input file,
         otherwise we list the mandatory blocks and parameters with default settings. """
         
+    
+    print xtype
     f = open(filename, 'w')
     if not f:
       print "Error: could not write to file %s." % filename
