@@ -214,8 +214,12 @@ if __name__ == '__main__':
   print a.parameters
   # Change the element dictionary itself so it writes the correct string.
   et.elements[0] = elements[z] + SPECIAL
-  # Add an extra line to the atomic_species block
+  # Add an extra line to the atomic_species block (at the start).
   a.parameters["atomic_species"].append("%s 1.0 %s" % (et.elements[0], args.PSP))
+  a.parameters["atomic_species"].insert(0, a.parameters["atomic_species"].pop())
+  # Move the special atom to the beginning of the positions and species list.
+  #a.positions.insert(0, a.positions.pop(si))
+  #a.species.insert(0, a.species.pop(si))
   # Now tell the Atoms object to write itself.
   fname = ".".join(args.INPUT.split('.')[0:-1]) + "_special.in"
   a.writeQEInput(fname)
