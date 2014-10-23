@@ -46,7 +46,7 @@ DEBUG=0
 parser = argparse.ArgumentParser(description="Convert .pdb to Quantum Espresso input")
 
 parser.add_argument('inputfile', help="Input .pdb file.")
-parser.add_argument('-u', '--units', default="frac", help="Units for atomic positions - choose frac or ang.")
+parser.add_argument('-u', '--units', default="alat", help="Units for atomic positions - choose alat (fractional) or ang.")
 parser.add_argument('-o', '--output', default="qe.in", help="Choose a name for your output file.")
 args = parser.parse_args()
 
