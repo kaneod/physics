@@ -10,8 +10,8 @@ gw = 0.02 # Gaussian smearing, Ha
 lw = 0.005 # Lorentzian smearing, Ha
 
 title="nc-pT"
-core_wf_file = "/home/kane/Desktop/Calculations/atomic_data/carbon/C.GGA-PBE-corewf-neutral.abinit"
-ae_wf_file = "/home/kane/Desktop/Calculations/porphyrins/nexafs/poro_AE_WFK-etsf.nc"
+core_wf_file = "C.GGA-PBE-corewf-neutral.abinit"
+ae_wf_file = "poro_AE_WFK-etsf.nc"
 
 c = el.Atom(core_wf_file)
 d = el.Atoms(ae_wf_file, "ETSF")
