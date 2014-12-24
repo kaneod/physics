@@ -364,7 +364,7 @@ class Atoms:
       elif filetype == "elk,input":
         self.loadFromElk(filename)
       elif filetype == "castep,cell":
-        self.loadFromCastep(filename)
+        self.loadFromCASTEP(filename)
       elif filetype == "aims,geometry":
         self.loadFromAimsGeometry(filename)
       #elif filetype == "aims,output":
@@ -469,7 +469,7 @@ class Atoms:
         self.species = spec
         if units == "bohr":
           self.positions = bohr2ang(self.positions)
-        elif units == "alat":
+        elif units == "alat" or units == "crystal":
           self.positions = reduced2cart(self.positions, self.lattice)
       elif k == "atomic_species":
         i = blocks[k]
@@ -874,7 +874,7 @@ class Atoms:
       self.species = spec
       self.is_crystal = True
     
-  def loadFromCastep(self, filename):
+  def loadFromCASTEP(self, filename):
     """ atoms = Atoms.loadFromCASTEP(filename)
     
     Internal, inits an Atoms object from a CASTEP .cell file. Note that
