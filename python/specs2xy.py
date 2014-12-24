@@ -54,7 +54,7 @@ t = specs.SPECS(args.file)
 
 print "specs2xy.py"
 print ""
-print "Written by Kane O'Donnell (kane.odonnell@gmail.com)"
+print "Written by Kane O'Donnell (kane.odonnell at gmail.com)"
 print ""
 print "Working on file: ", args.file
 
