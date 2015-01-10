@@ -905,6 +905,9 @@ class Atoms:
     if DEBUG:
       for i, line in enumerate(data):
         print i, line 
+        
+    self.parameters = {}
+    self.parameters['CASTEP'] = {}
     
     # Line-by-line parse
     i = 0
