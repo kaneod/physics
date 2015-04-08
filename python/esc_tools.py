@@ -516,7 +516,7 @@ class Atoms:
         self.parameters["atomic_force"] = tmp
 
 
-  def writeQEInput(self, filename, xtype="ang"):
+  def writeQEInput(self, filename, xtype="ang", opt=None):
     """ Writes a QE input file based on the Atoms object. If the parameters_type
         is set to QE, we use the parameters dictionary to fill out the input file,
         otherwise we list the mandatory blocks and parameters with default settings. """
@@ -537,6 +537,19 @@ class Atoms:
     elif xtype == "alat":
       lv = self.lattice
       pos = cart2reduced(self.positions, self.lattice)
+      
+    if "corehole" in opt.keys():
+      add_corehole = True
+      corehole_index = opt["corehole"]
+    else:
+      add_corehole = False
+      
+    if "suffix atoms" in opt.keys():
+      suffix_some_atoms = True
+      suffix = "x"
+      atoms_to_suffix = opt["suffix atoms"]
+    else:
+      suffix_some_atoms = False
     
     # This is a bit tricky. If we have QE parameters, write all the namelists first,
     # then write any cards (except atomic_species) AFTER the important cards below.
@@ -589,8 +602,14 @@ class Atoms:
       f.write("ATOMIC_POSITIONS %s\n" % xtype)
     elif xtype == "ang":
       f.write("ATOMIC_POSITIONS angstrom\n")
-    for (s,v) in zip(self.species, pos):
-      f.write("%s    %g    %g    %g\n" % (elements[s], v[0], v[1], v[2]))
+    for i in range(len(pos)):
+      v = pos[i]
+      s = elements[self.species[i]]
+      if add_corehole and (i == corehole_index):
+        s += "h"
+      if suffix_some_atoms and i in atoms_to_suffix:
+        s += suffix
+      f.write("%s    %g    %g    %g\n" % (s, v[0], v[1], v[2]))
     
     # Ok now write any cards from self.parameters (except atomic_species).
     def write_card(key):
@@ -700,7 +719,7 @@ class Atoms:
       self.positions = pos
       self.species = spec
       
-  def writePDB(self, filename, opt=None):
+  def writePDB(self, filename, opt={}):
     """ Write a PDB file.
     
     Some notes about compliance:
@@ -715,6 +734,19 @@ class Atoms:
   
     pos = self.positions
     spec = self.species
+    
+    if "corehole" in opt.keys():
+      add_corehole = True
+      corehole_index = opt["corehole"]
+    else:
+      add_corehole = False
+      
+    if "suffix atoms" in opt.keys():
+      suffix_some_atoms = True
+      suffix = "x"
+      atoms_to_suffix = opt["suffix atoms"]
+    else:
+      suffix_some_atoms = False
   
     if self.lattice is not None and self.lattice != []:
       avec = self.lattice
@@ -743,8 +775,14 @@ class Atoms:
     
       f.write("CRYST1%9.3f%9.3f%9.3f%7.2f%7.2f%7.2f P 1            1\n" % (a, b, c, alpha, beta, gamma))
     
-    for i, (p, s) in enumerate(zip(pos,spec)):
-      specname = elements[s].rjust(2)
+    for i in range(len(pos)):
+      p = pos[i]
+      s = elements[spec[i]]
+      if add_corehole and (i == corehole_index):
+        s += "h"
+      if suffix_some_atoms and i in atoms_to_suffix:
+        s += suffix      
+      specname = s.rjust(2)
       f.write("ATOM  %5d %s     X     1    %8.3f%8.3f%8.3f                      %s  \n" % \
                     (i+1, specname.upper(), p[0],p[1],p[2],specname))
   
@@ -1029,6 +1067,19 @@ class Atoms:
       constraint_list_species = [getElementZ(x) for x in opt["constrain species"]]
     else:
       species_constraints = False 
+      
+    if "corehole" in opt.keys():
+      add_corehole = True
+      corehole_index = opt["corehole"]
+    else:
+      add_corehole = False
+      
+    if "suffix atoms" in opt.keys():
+      suffix_some_atoms = True
+      suffix = "x"
+      atoms_to_suffix = opt["suffix atoms"]
+    else:
+      suffix_some_atoms = False
 
     if xtype == "frac":
       avec = self.lattice
@@ -1051,8 +1102,12 @@ class Atoms:
           f.write("lattice_vector %4.8g %4.8g %4.8g\n" % (l[0], l[1], l[2]))
       for i in range(len(pos)):
         p = pos[i]
-        s = spec[i]
-        f.write("atom  %4.8g %4.8g %4.8g %s\n" % (p[0], p[1], p[2], elements[s]))
+        s = elements[spec[i]]
+        if add_corehole and (i == corehole_index):
+          s += "h"
+        if suffix_some_atoms and i in atoms_to_suffix:
+          s += suffix
+        f.write("atom  %4.8g %4.8g %4.8g %s\n" % (p[0], p[1], p[2], s))
         if index_constraints and i in opt["constrain atoms"]:
           f.write("  constrain_relaxation .true.\n")
         elif species_constraints and s in constraint_list_species:
@@ -1062,18 +1117,24 @@ class Atoms:
         f.write("lattice_vector %4.8g %4.8g %4.8g\n" % (l[0], l[1], l[2]))
     
       f.write("\n")
-      for s, p in zip(spec, pos):
-        f.write("atom_frac  %4.8g %4.8g %4.8g %s\n" % (p[0], p[1], p[2], elements[s]))
+      for i in range(len(pos)):
+        p = pos[i]
+        s = elements[spec[i]]
+        if add_corehole and (i == corehole_index):
+          s += "h"
+        if suffix_some_atoms and i in atoms_to_suffix:
+          s += suffix
+        f.write("atom_frac  %4.8g %4.8g %4.8g %s\n" % (p[0], p[1], p[2], s))
         if index_constraints and i in opt["constrain atoms"]:
           f.write("  constrain_relaxation .true.\n")
-        elif species_constraints and s in constraint_list_species:
+        elif species_constraints and elements[spec[i]] in constraint_list_species:
           f.write("  constrain_relaxation .true.\n")
     f.close()
 
     return True
     
-  def writeCASTEP(self, filename, xtype="ang", opt=None):
-    """ succeeded = write_castep(filename, positions, species=None, xtype="ang", opt=None, timestep=0)
+  def writeCASTEP(self, filename, xtype="ang", opt={}):
+    """ succeeded = writeCASTEP(filename, xtype="ang", opt={})
   
     Writes a CASTEP .cell file using the passed positions. Options for xtype are 
     "ang", "bohr" or "frac".
@@ -1082,12 +1143,7 @@ class Atoms:
     vectors. Also, if fractional output is specified, the lattice vectors
     are output in angstroms, the CASTEP default length unit.
   
-    opt is a dictionary that gives output options. Options are:
-  
-    'special atom' : n - index of atom that is special. Will have ":exc" appended
-                        to the Z number in the positions_abs/frac block so that
-                        you can specify a separate species_pot pseudopotential
-                        generation string or PSP file.
+    opt is a dictionary used to pass in custom write modifications.
   
     """
   
@@ -1101,6 +1157,19 @@ class Atoms:
       avec = ang2bohr(avec)
     elif xtype == "frac":
       pos = cart2reduced(pos,avec)
+      
+    if "corehole" in opt.keys():
+      add_corehole = True
+      corehole_index = opt["corehole"]
+    else:
+      add_corehole = False
+      
+    if "suffix atoms" in opt.keys():
+      suffix_some_atoms = True
+      suffix = "x"
+      atoms_to_suffix = opt["suffix atoms"]
+    else:
+      suffix_some_atoms = False
   
     f = open(filename, 'w')
   
@@ -1117,14 +1186,14 @@ class Atoms:
       f.write("%block positions_abs\n")
       if xtype == "bohr":
         f.write("  bohr\n")
-    for i, (s, p) in enumerate(zip(spec, pos)):
-      if opt is not None and 'special atom' in opt:
-        if opt["special atom"] == i+1:
-          f.write("  %s %010e %010e %010e\n" % (elements[s]+":exc", p[0], p[1], p[2]))
-        else:
-          f.write("  %s %010e %010e %010e\n" % (elements[s], p[0], p[1], p[2]))
-      else:
-        f.write("  %s %010e %010e %010e\n" % (elements[s], p[0], p[1], p[2]))
+    for i in range(len(pos)):
+        p = pos[i]
+        s = elements[spec[i]]
+        if add_corehole and (i == corehole_index):
+          s += "h"
+        if suffix_some_atoms and i in atoms_to_suffix:
+          s += suffix        
+        f.write("  %s %010e %010e %010e\n" % (s, p[0], p[1], p[2]))
     if xtype == "frac":
       f.write("%endblock positions_frac\n")
     else:
