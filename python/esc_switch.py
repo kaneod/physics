@@ -37,7 +37,7 @@ import esc_tools as et
 
 DEBUG=0
 
-parser = argparse.ArgumentParser(description="Create FHI-aims control.in template from geometry")
+parser = argparse.ArgumentParser(description="Switch between electronic structure file formats.")
 
 parser.add_argument('-i', '--input_format', default='pdb', help="File format of input - aims, castep, qe or pdb.")
 parser.add_argument('-o', '--output_format', default='castep', help="File format for output - aims, castep, qe or pdb.")
