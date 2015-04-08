@@ -72,8 +72,23 @@ if geom.lattice is None:
     print "List is: ", index_list  
 # Case 2: unit cell present, periodic boundary conditions need to be accounted for.
 else:
-  print "PBCs not implemented yet!"
-  sys.exit(0)
+  special_p = geom.positions[args.atom_index - 1]
+  index_list = []
+  g_list = [-1, 0, 1]
+  g1 = geom.lattice[0]
+  g2 = geom.lattice[1]
+  g3 = geom.lattice[2]
+  for i, p in enumerate(geom.positions):
+    if (i is not args.atom_index - 1):
+      for a in g_list:
+        for b in g_list:
+          for c in g_list:
+            ppg = special_p + a * g1 + b * g2 + c * g3
+            if norm(ppg - p) < args.radius:
+              index_list.append(i)
+  if DEBUG:
+    print "PBCs present, index atom is:", args.atom_index - 1
+    print "List is: ", index_list  
 
 # Write out in the same format as read.
 
