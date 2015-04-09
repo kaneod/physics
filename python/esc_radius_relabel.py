@@ -65,7 +65,7 @@ if geom.lattice is None:
   special_p = geom.positions[args.atom_index - 1]
   index_list = []
   for i, p in enumerate(geom.positions):
-    if (i is not args.atom_index - 1) and norm(special_p - p) < args.radius:
+    if (i != args.atom_index - 1) and norm(special_p - p) < args.radius:
       index_list.append(i)
   if DEBUG:
     print "No PBCs, index atom is:", args.atom_index - 1
@@ -79,7 +79,7 @@ else:
   g2 = geom.lattice[1]
   g3 = geom.lattice[2]
   for i, p in enumerate(geom.positions):
-    if (i is not args.atom_index - 1):
+    if (i != args.atom_index - 1):
       for a in g_list:
         for b in g_list:
           for c in g_list:
