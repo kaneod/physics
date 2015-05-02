@@ -41,6 +41,7 @@ parser = argparse.ArgumentParser(description="Switch between electronic structur
 
 parser.add_argument('-i', '--input_format', default='pdb', help="File format of input - aims, castep, qe or pdb.")
 parser.add_argument('-o', '--output_format', default='castep', help="File format for output - aims, castep, qe or pdb.")
+parser.add_argument('-c', '--constrain_hydrogens', default=False, dest='constrain_hydrogens', action='store_true', help="Constrain hydrogen atoms.")
 parser.add_argument('inputfile', help="Input file.")
 parser.add_argument('outputfile', help="Output file.")
 args = parser.parse_args()
@@ -57,12 +58,18 @@ else:
   print "Error: can't recognize input file format specification. Must be castep, qe, pdb or aims. Exiting..."
   sys.exit(0)
 
+# Construct options dictionary
+if args.constrain_hydrogens is True:
+	opts = {"constrain species" : ["H"]}
+else:
+	opts = {}
+	
 if args.output_format == "aims":
-  geom.writeAims(args.outputfile)
+  geom.writeAims(args.outputfile, opt=opts)
 elif args.output_format == "castep":
-  geom.writeCASTEP(args.outputfile)
+  geom.writeCASTEP(args.outputfile, opt=opts)
 elif args.output_format == "qe":
-  geom.writeQEInput(args.outputfile)
+  geom.writeQEInput(args.outputfile, opt=opts)
 elif args.output_format == "pdb":
   geom.writePDB(args.outputfile)
 else:
