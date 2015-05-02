@@ -39,7 +39,7 @@ from numpy.linalg import *
 import os
 
 # Debugging flag - set to 1 to see debug messages.
-DEBUG=1
+DEBUG=0
 
 # Periodic table
 
@@ -516,7 +516,7 @@ class Atoms:
         self.parameters["atomic_force"] = tmp
 
 
-  def writeQEInput(self, filename, xtype="ang", opt=None):
+  def writeQEInput(self, filename, xtype="ang", opt={}):
     """ Writes a QE input file based on the Atoms object. If the parameters_type
         is set to QE, we use the parameters dictionary to fill out the input file,
         otherwise we list the mandatory blocks and parameters with default settings. """
@@ -1108,9 +1108,12 @@ class Atoms:
         if suffix_some_atoms and i in atoms_to_suffix:
           s += suffix
         f.write("atom  %4.8g %4.8g %4.8g %s\n" % (p[0], p[1], p[2], s))
+        if add_corehole and (i == corehole_index):
+          # Put an initial spin on the atom with the core hole.
+    	  f.write("initial_moment 1.0\n")
         if index_constraints and i in opt["constrain atoms"]:
           f.write("  constrain_relaxation .true.\n")
-        elif species_constraints and s in constraint_list_species:
+        elif species_constraints and s in opt["constrain species"]:
           f.write("  constrain_relaxation .true.\n")
     elif xtype == "frac":
       for l in avec:
@@ -1125,6 +1128,9 @@ class Atoms:
         if suffix_some_atoms and i in atoms_to_suffix:
           s += suffix
         f.write("atom_frac  %4.8g %4.8g %4.8g %s\n" % (p[0], p[1], p[2], s))
+        if add_corehole and (i == corehole_index):
+          # Put an initial spin on the atom with the core hole.
+    	  f.write("initial_moment 1.0\n")
         if index_constraints and i in opt["constrain atoms"]:
           f.write("  constrain_relaxation .true.\n")
         elif species_constraints and elements[spec[i]] in constraint_list_species:
