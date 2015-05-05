@@ -54,10 +54,12 @@ from numpy.linalg import norm
 import argparse
 import sys
 import os.path
+import imp
 
 Ry2eV = 13.605698066
 SMALL = 1.0e-6		# small floating point number for equality comparisons
 DEBUG=1
+NUM_POINTS=2000		# Number of interpolation points for combining spectra.
 
 ######################
 #
@@ -73,7 +75,7 @@ def calculate_spectrum(evec, components):
 	nvec = evec / norm(evec)
 	
 	# Now generate spectrum. 
-	spec = zeroes((components['E'].shape[0], 2))
+	spec = zeros((components['E'].shape[0], 2))
 	for i in range(spec.shape[0]):
 		spec[i,0] = components['E'][i]
 		spec[i,1] = (nvec[0] ** 2) * components['xx'][i] + (nvec[1] ** 2) * components['yy'][i] + \
@@ -106,19 +108,40 @@ def angle_vec(evec, angle):
 	else:
 		factor = (cos(angle * pi / 180.0))**(-2.0) - 1.0
 		return array([evec[0], evec[1], norm(evec) * factor])
+		
+def prune_duplicate_vectors(vecs):
+	""" Returns a list of unique vectors, where two vectors are unique if they are not
+	parallel *or* anti-parallel."""
+	
+	pruned = [vecs[0]]
+	
+	for v in vecs[1:]:
+		dupe = False
+		for p in pruned:
+			if abs(dot(v, p) - norm(p) * norm(v)) < SMALL:
+				dupe = True
+				break
+			elif abs(dot(v, p) + norm(p) * norm(v)) < SMALL:
+				dupe = True
+				break
+		if not dupe:
+			pruned.append(v)
+			
+	return pruned
+				
 
-def combine_spectra(x1, y1, x2, y2, npts):
+def combine_two_spectra(s1, s2, npts):
 	""" Given two spectra on possibly slightly-different X-axes, combine into one with a
 	common X-axis defined by the overlapping region."""
 	
 	# Generate the new axis
-	newmin = max(amin(x1), amin(x2))
-	newmax = min(amax(x1), amax(x2))
+	newmin = max(amin(s1[:,0]), amin(s2[:,0]))
+	newmax = min(amax(s1[:,0]), amax(s2[:,0]))
 	newx = linspace(newmin, newmax, npts)
 	
 	# Interpolate the existing y ranges onto the new grid.
-	ny1 = interp(newx, x1, y1)
-	ny2 = interp(newx, x2, y2)
+	ny1 = interp(newx, s1[:,0], s1[:,1])
+	ny2 = interp(newx, s2[:,0], s2[:,1])
 	
 	# Add the two together and put in an energy column.
 	spec = zeros((npts, 2))
@@ -127,11 +150,50 @@ def combine_spectra(x1, y1, x2, y2, npts):
 	
 	return spec
 	
-def combine_sites(sites):
-	""" Uses combine_spectra to combine the cross section components from multiple atomic
-	sites. """
+def combine_spectra(spectra, npts):
+	""" Use combine_two_spectra to combine a list of spectra arrays. """
+	
+	if len(spectra) == 0:
+		if DEBUG:
+			print "Warning (combine_spectra): tried to combine an empty list of spectra."
+		return []
+	else:
+		combined = spectra.pop()
+		while len(spectra) > 0:
+			combined = combine_two_spectra(combined, spectra.pop(), npts)
+		return combined	
 	
 	
+def combine_two_sites(s1, s2, npts):
+	""" Rather than re-use combine_spectra, we rewrite specifically for a components
+	structure. That is, s1 and s2 are dictionaries with keys 'E', 'xx' etc. """
+	
+	combined = {}
+	# Generate the new axis
+	newmin = max(amin(s1['E']), amin(s2['E']))
+	newmax = min(amax(s1['E']), amax(s2['E']))
+	combined['E'] = linspace(newmin, newmax, npts)
+	
+	for key in ['xx', 'yy', 'zz', 'xy', 'xz', 'yz']:
+		# Interpolate components onto new grid.
+		newy1 = interp(combined['E'], s1['E'], s1[key])
+		newy2 = interp(combined['E'], s2['E'], s2[key])
+		combined[key] = newy1[:] + newy2[:]
+	
+	return combined
+	
+def combine_sites(sites, npts):
+	""" Uses combine_two_sites to interpolate all the atomic site components together. """
+	
+	if len(sites) == 0:
+		if DEBUG:
+			print "Warning (combine_sites): tried to combine an empty list of sites."
+		return []
+	else:
+		combined = sites.pop()
+		while len(sites) > 0:
+			combined = combine_two_sites(combined, sites.pop(), npts)
+		return combined
 
 parser = argparse.ArgumentParser(description="Take XSpectra output from multiple atoms and combine it.")
 
@@ -141,7 +203,24 @@ parser.add_argument('--angles', '-a', dest='angles', action='store_true', defaul
 parser.add_argument('--symmetry', '-y', dest='symmetry', action='store_true', default=False, help="Look for symmetries function and apply symmetries.")
 args = parser.parse_args()
 
-# First task is to load all the spectra. Structure is a list of atoms where each atom is a dictionary keyed by '100' etc.
+# Init task: decide whether we have and/or need an external symmetry function, and
+# assign as necessary.
+if args.symmetry:
+	try:
+		imp.find_module('qnex_symmetries')
+		sym_found = True
+	except ImportError:
+		sym_found = False
+	if sym_found:
+		import qnex_symmetries
+		symmetry_function = qnex_symmetries.symmetry_generate
+	else:
+		symmetry_function = symmetry_stub
+else:
+	symmetry_function = symmetry_stub
+
+
+# First real task is to load all the spectra. Structure is a list of atoms where each atom is a dictionary keyed by '100' etc.
 atoms = []
 
 for i in range(args.num_atoms):
@@ -232,7 +311,7 @@ if not args.angles:
 				f.write("%f    %f    %f    %f    %f    %f    %f\n" % (tmp['E'][j], tmp['xx'][j], tmp['yy'][j], tmp['zz'][j], tmp['xy'][j], tmp['xz'][j], tmp['yz'][j]))
 		f.close()
 	else:
-		combined_components = combine_sites(atom_components)
+		combined_components = combine_sites(atom_components, NUM_POINTS)
 		f = open("qnex.combined_sites.dat", 'w')
 		f.write("# NEXAFS components output by qnex_combine.py\n")
 		f.write("# All atomic sites combined.\n")
@@ -252,3 +331,48 @@ if not args.angles:
 # ez^2, ex*ey, ex*ez and ey*ez. This code will always normalize all vectors prior to generating
 # a spectrum.
 
+# Regardless of our output choice (combined or separate) we need angle spectra generated for all
+# angles for all atomic sites, so we do that first.
+
+if args.angles:
+	inplane = array([1.0, 1.0, 0.0])
+	base_vecs = [angle_vec(inplane, 20), angle_vec(inplane, 35), angle_vec(inplane, 55), angle_vec(inplane, 75), angle_vec(inplane, 90)]
+	base_names = ["20", "35", "55", "75", "90"]
+	
+	# Treat each angle separately even if combining atomic sites.
+	for v,b in zip(base_vecs, base_names):
+		sym_vecs = symmetry_function(v)
+		# Some of these might be duplicates, so we have to prune the list.
+		sym_vecs = prune_duplicate_vectors(sym_vecs)
+		# For each symmetry vector, need a spectrum for each site. Since we always add the 
+		# symmetry-related spectra, there is no need to store separately - just add them 
+		# together as they are calculated.
+		atomic_spectra = []
+		for i in range(args.num_atoms):
+			tmp_specs = []
+			for v in sym_vecs:
+				tmp_specs.append(calculate_spectrum(v, atom_components[i]))
+			atomic_spectra.append(combine_spectra(tmp_specs, NUM_POINTS))
+		
+		# If we want site-specific output, do this now.
+		if args.sites:
+			for i in range(args.num_atoms):
+				f = open("qnex.atom" + str(i+1) + ".angle" + b + ".dat", 'w')
+				f.write("# NEXAFS angle output by qnex_combine.py\n")
+				f.write("# Atom: " + str(i+1) + " Angle: " + b + " degrees.\n")
+				f.write("# E    sigma\n")
+				for j in range(atomic_spectra[i].shape[0]):
+					f.write("%f    %f\n" % (atomic_spectra[i][j,0], atomic_spectra[i][j,1]))
+				f.close()
+		else:
+			# Combine spectra, and output.
+			combined = combine_spectra(atomic_spectra, NUM_POINTS)
+			f = open("qnex.combined.angle" + b + ".dat", 'w')
+			f.write("# NEXAFS angle output by qnex_combine.py\n")
+			f.write("# All atomic sites combined, angle " + b + " degrees.\n")
+			f.write("# E    sigma\n")
+			for j in range(combined.shape[0]):
+				f.write("%f    %f\n" % (combined[j,0], combined[j,1]))
+			f.close()
+			
+print "Finished qnex_combine!"
