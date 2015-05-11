@@ -13,29 +13,12 @@
 #
 # Mostly, the files here are for doing things like converting the outputs of
 # various electronic structure codes into inputs of other electronic structure
-# codes, or to formats readable by molecular viewer software.
+# codes, or to formats readable by molecular viewer software. Codes of
+# particular focus are FHI-aims, Quantum Espresso and CASTEP, with the latter
+# two the subject of more recent work.
 #
-# There are also plenty of little transformation functions that are useful
-# for manipulating molecular/crystal structure and so on.
-#
-# In general the philosophy here is to write everything in python and if 
-# speedup is necessary, use fortran and f2py. The exception is in
-# reading/writing binary files written by other codes themselves written in
-# fortran - in that case it is usually easier to write the routines here also
-# in fortran. 
-#
-# It is often said that professional programmers reuse. I'm not a professional
-# programmer in any sense: I don't claim that much of what is here has not been
-# solved before, it's just that it's usually faster for me to write my own
-# routine rather than try to learn the interface to someone elses. In some cases
-# I would have liked to use someone else's code: particularly, if there is a 
-# way to parse text files of wildly different formats in a structured and
-# sensible way in python without having to actually use a lexical analyzer at
-# the compiler-level of complexity, I'd love to know about it. Anyone?
-#
-# The code here is written in (and for) Python 2.7 and most of it requires
-# the numpy and scipy libraries (in one case, Scientific Python is also
-# required).
+# Most things are written in Python for version 2.7 or above, and in many
+# cases numpy is required. Very rarely, scipy will also be needed. 
 #
 # I am happy for other people to use and/or contribute to the codes here, with
 # the proviso that it is all GPLv3-licensed. See the COPYING file for more
@@ -46,12 +29,10 @@
 # kane dot odonnell at curtin dot edu dot au 
 # 
 # Alternatively, try searching for me on the web and don't get confused with the 
-# Kane O'Donnell from New Zealand who ALSO happens to study physics. 
+# Kane O'Donnell from New Zealand who ALSO happens to study condensed matter 
+# physics.
+# 
 # I'm the one from Australia!
 # 
-# PS: If YOU are the Kane O'Donnell from NZ, congratulations on your
-# scholarship to Cambridge! It's a great place, you'll love it.
-# 
-# Cheers from across the Tasman! :o)
 #
 ################################################################################
