@@ -57,9 +57,12 @@ import os.path
 import imp
 
 Ry2eV = 13.605698066
-SMALL = 1.0e-6    # small floating point number for equality comparisons
-DEBUG=1
-NUM_POINTS=2000   # Number of interpolation points for combining spectra.
+SMALL = 1.0e-6    			# small floating point number for equality comparisons
+DEBUG = 1								# Print debug statements
+FIX_OCC_CUT_DEFECT = 1	# XSpectra's method of cutting occupied states leaves a defect,
+												# where the first point below zero eV is too large. Fix by
+												# interpolating from the surrounding points.
+NUM_POINTS = 2000   		# Number of interpolation points for combining spectra.
 
 ######################
 #
@@ -169,7 +172,28 @@ def prune_duplicate_vectors(vecs):
     
   return pruned
         
-
+def fix_occupancy_cutting_defect(esigma):
+	""" Given the raw XSpectra E, sigma input, finds the sigma value closest to but below
+	zero eV and replaces it with a linear interpolation from the nearest points. This is to
+	correct the intensity "spike" that XSpectra puts there as a result of a somewhat faulty
+	occupancy cutting algorithm. """
+	
+	# First find index of smallest non-negative energy.
+	smallest = -100000
+	index = 0
+	while esigma[index,0] < 0:
+		index += 1
+	
+	x1 = esigma[index-2,0]
+	x2 = esigma[index,0]
+	xi = esigma[index-1,0]
+	for j in range(1,esigma.shape[1]):
+		y1 = esigma[index-2,j]
+		y2 = esigma[index,j]
+		esigma[index-1,j] = y1 + ((y2 - y1)/(x2 - x1)) * (xi - x1)
+	
+	return esigma
+	
 def combine_two_spectra(s1, s2, npts):
   """ Given two spectra on possibly slightly-different X-axes, combine into one with a
   common X-axis defined by the overlapping region."""
@@ -229,14 +253,14 @@ def combine_sites(sites, npts):
       print "Warning (combine_sites): tried to combine an empty list of sites."
     return []
   else:
-    combined = sites.pop()
+    combined = sites.pop(sites.keys()[-1])
     while len(sites) > 0:
-      combined = combine_two_sites(combined, sites.pop(), npts)
+      combined = combine_two_sites(combined, sites.pop(sites.keys()[-1]), npts)
     return combined
 
 parser = argparse.ArgumentParser(description="Take XSpectra output from multiple atoms and combine it.")
 
-parser.add_argument('num_atoms', type=int, help="Number of atomic absorber sites.")
+parser.add_argument('atoms', type=int, nargs="+", help="Indices of atomic absorber sites.")
 parser.add_argument('--sites', '-s', dest='sites', action='store_true', default=False, help="Output combined spectra for each individual atomic site.")
 parser.add_argument('--angles', '-a', dest='angles', action='store_true', default=False, help="Generate 20, 35, 55, 75, 90 degree spectra instead of components.")
 parser.add_argument('--symmetry', '-y', dest='symmetry', action='store_true', default=False, help="Look for symmetries function and apply symmetries.")
@@ -244,10 +268,13 @@ args = parser.parse_args()
 
 if DEBUG:
   print "DEBUG input check:"
-  print "num_atoms = ", args.num_atoms
+  print "atoms = ", args.atoms
   print "sites = ", args.sites
   print "angles = ", args.angles
   print "symmetry = ", args.symmetry
+  
+# Init task: check atoms input is valid/remove duplicates.
+indices = set(args.atoms)
 
 # Init task: decide whether we have and/or need an external symmetry function, and
 # assign as necessary.
@@ -266,28 +293,31 @@ else:
   symmetry_function = symmetry_stub
 
 
-# First real task is to load all the spectra. Structure is a list of atoms where each atom is a dictionary keyed by '100' etc.
-atoms = []
+# First real task is to load all the spectra. Structure is a dict of atoms where each atom is a dictionary keyed by '100' etc.
+atoms = {}
 
-for i in range(args.num_atoms):
+for i in indices:
   this_atom = {}
   for v in ['100', '110', '010', '011', '001', '101']:
-    tmp = loadtxt("xanes.atom" + str(i+1) + "." + v + ".dat")
+    tmp = loadtxt("xanes.atom" + str(i) + "." + v + ".dat")
+    if FIX_OCC_CUT_DEFECT:
+    	tmp = fix_occupancy_cutting_defect(tmp)
     # If the calculation was spin polarized this file will have four columns and we only
     # want the "up" spin (that's where the excited electron goes).
     if tmp.shape[1] == 4:
       this_atom[v] = tmp[:,0::2].copy() ## AHA! I have defeated you, you sly View beast!
     else:
       this_atom[v] = tmp.copy()
-  atoms.append(this_atom)
+  
+  atoms[i] = this_atom
 
 # Next task is to use the 100, etc outputs to generate components xx, yy, etc.
 # A single 7-column array might be "neater" here but the dictionary makes the code easier
 # to read/think about.
 
-atom_components = []
+atom_components = {}
 
-for i in range(args.num_atoms):
+for i in indices:
   this_atom = {}
   this_atom['E'] = atoms[i]['100'][:,0]
   this_atom['xx'] = atoms[i]['100'][:,1]
@@ -296,7 +326,7 @@ for i in range(args.num_atoms):
   this_atom['xy'] = 2.0 * atoms[i]['110'][:,1] - atoms[i]['100'][:,1] - atoms[i]['010'][:,1]
   this_atom['xz'] = 2.0 * atoms[i]['101'][:,1] - atoms[i]['100'][:,1] - atoms[i]['001'][:,1]
   this_atom['yz'] = 2.0 * atoms[i]['011'][:,1] - atoms[i]['010'][:,1] - atoms[i]['001'][:,1]
-  atom_components.append(this_atom)
+  atom_components[i] = this_atom
 
 # Regardless of whether we want output as components or angles, we have to have everything
 # on a sensible energy scale, so we do this now. Note that we exit with an error message
@@ -311,27 +341,32 @@ if os.path.isfile("total_energies"):
     total_energies[l.split()[0]] = float(l.split()[1]) * Ry2eV
   # We need the ground state to get a decent transition energies, otherwise just use the average
   # of the energies and the difference as the shift.
-  transitions = []
+  transitions = {}
   if "ground" in total_energies.keys():
     ground = total_energies['ground']
-    for i in range(args.num_atoms):
-      transitions.append(total_energies[str(i+1)] - ground)
+    for i in indices:
+      transitions[i] = total_energies[str(i)] - ground
   else:
     # Dodgy hack for average of a dictionary.
     ground = 0
     for k in total_energies.keys():
       ground += total_energies[k]
     ground /= len(total_energies.keys())
-    for i in range(args.num_atoms):
-      transitions.append(total_energies[str(i+1)] - ground)
+    for i in indices:
+      transitions[i] = total_energies[str(i)] - ground
   # Now we need the difference between the HOMO and LUMO and subtract this off the
   # existing transitions.
   if os.path.isfile("frontier_levels"):
-    tmp = loadtxt("frontier_levels")
-    for i in range(args.num_atoms):
-      transitions[i] -= tmp[i,2] - tmp[i,1]
+    tmp = {}
+    f = open("frontier_levels", 'r')
+    lines = f.readlines()
+    f.close()
+    for l in lines:
+    	tmp[l.split()[0]] = float(l.split()[2]) - float(l.split()[1]) # Elumo - Ehomo
+    for i in indices:
+      transitions[i] -= tmp[str(i)]
   # Now set up the energy scale for all the atomic sites.
-  for i in range(args.num_atoms):
+  for i in indices:
     atom_components[i]['E'] += transitions[i]
 
 if DEBUG:
@@ -347,10 +382,10 @@ if DEBUG:
 # of matrix elements and not the actual complex matrix elements themselves.
 if not args.angles:
   if args.sites:
-    for i in range(args.num_atoms):
-      f = open("qnex.atom" + str(i+1) + ".dat", 'w')
+    for i in indices:
+      f = open("qnex.atom" + str(i) + ".dat", 'w')
       f.write("# NEXAFS components output by qnex_combine.py\n")
-      f.write("# Atom: "+ str(i+1) + "\n")
+      f.write("# Atom: "+ str(i) + "\n")
       f.write("# E    xx    yy    zz    xy    xz    yz\n")
       tmp = atom_components[i]
       for j in range(atom_components[i]['E'].shape[0]):
@@ -393,7 +428,7 @@ if args.angles:
     # symmetry-related spectra, there is no need to store separately - just add them 
     # together as they are calculated.
     atomic_spectra = []
-    for i in range(args.num_atoms):
+    for i in indices:
       tmp_specs = []
       for v in sym_vecs:
         tmp_specs.append(calculate_spectrum(v, atom_components[i]))
@@ -405,10 +440,10 @@ if args.angles:
     
     # If we want site-specific output, do this now.
     if args.sites:
-      for i in range(args.num_atoms):
-        f = open("qnex.atom" + str(i+1) + ".angle" + b + ".dat", 'w')
+      for i in indices:
+        f = open("qnex.atom" + str(i) + ".angle" + b + ".dat", 'w')
         f.write("# NEXAFS angle output by qnex_combine.py\n")
-        f.write("# Atom: " + str(i+1) + " Angle: " + b + " degrees.\n")
+        f.write("# Atom: " + str(i) + " Angle: " + b + " degrees.\n")
         f.write("# E    sigma\n")
         for j in range(atomic_spectra[i].shape[0]):
           f.write("%f    %f\n" % (atomic_spectra[i][j,0], atomic_spectra[i][j,1]))
