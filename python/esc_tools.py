@@ -438,7 +438,10 @@ class Atoms:
     
     for i, line in enumerate(data):
       if line.split()[0].strip().lower() in keywords:
-        blocks[line.split()[0].strip().lower()] = i
+        # Need a check here because there's an option "occupations" and a block "occupations"
+        # and both will be found by this search.
+        if "=" not in line:
+          blocks[line.split()[0].strip().lower()] = i
         
     # Need to read the &system namelist first, then can read all the others.
     process_namelist(blocks["&system"])
