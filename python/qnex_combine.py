@@ -426,7 +426,7 @@ if args.angles:
     # For each symmetry vector, need a spectrum for each site. Since we always add the 
     # symmetry-related spectra, there is no need to store separately - just add them 
     # together as they are calculated.
-    atomic_spectra = []
+    atomic_spectra = {}
     for i in indices:
       tmp_specs = []
       for v in sym_vecs:
@@ -435,7 +435,7 @@ if args.angles:
       # so normalize by the number of vectors in the set.
       combined = combine_spectra(tmp_specs, NUM_POINTS)
       combined[:,1] /= len(sym_vecs)
-      atomic_spectra.append(combined)
+      atomic_spectra[i] = combined
     
     # If we want site-specific output, do this now.
     if args.sites:
