@@ -3,8 +3,7 @@
 #
 # qnex_combine.py
 #
-# Given a radius in angstroms and an atomic index, adds a suffix to all atoms
-# within range of that specified atom. Handles periodic boundary conditions.
+# QE NEXAFS post-processor.
 #
 ################################################################################
 #
@@ -262,7 +261,7 @@ parser = argparse.ArgumentParser(description="Take XSpectra output from multiple
 
 parser.add_argument('atoms', type=int, nargs="+", help="Indices of atomic absorber sites.")
 parser.add_argument('--sites', '-s', dest='sites', action='store_true', default=False, help="Output combined spectra for each individual atomic site.")
-parser.add_argument('--angles', '-a', dest='angles', action='store_true', default=False, help="Generate 20, 35, 55, 75, 90 degree spectra instead of components.")
+parser.add_argument('--angles', '-a', dest='angles', action='store_true', default=False, help="Generate 20, 40, 55, 70, 90 degree spectra instead of components.")
 parser.add_argument('--symmetry', '-y', dest='symmetry', action='store_true', default=False, help="Look for symmetries function and apply symmetries.")
 args = parser.parse_args()
 
@@ -416,8 +415,8 @@ if not args.angles:
 # angles for all atomic sites, so we do that first.
 
 if args.angles:
-  base_vecs = [spherical_to_cartesian(45,20), spherical_to_cartesian(45, 35), spherical_to_cartesian(45,55), spherical_to_cartesian(45,75), spherical_to_cartesian(45,90)]
-  base_names = ["20", "35", "55", "75", "90"]
+  base_vecs = [spherical_to_cartesian(45,20), spherical_to_cartesian(45, 40), spherical_to_cartesian(45,55), spherical_to_cartesian(45,70), spherical_to_cartesian(45,90)]
+  base_names = ["20", "40", "55", "70", "90"]
   
   # Treat each angle separately even if combining atomic sites.
   for v,b in zip(base_vecs, base_names):
