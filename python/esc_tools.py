@@ -41,6 +41,9 @@ import os
 # Debugging flag - set to 1 to see debug messages.
 DEBUG=0
 
+# A small number, for float equality comparison
+SMALL = 1.0e-6
+
 # Periodic table
 
 elements = { 1 : "H", 2 : "He", 3 : "Li", 4 : "Be", 5 : "B", 6 : "C", 7 : "N", \
@@ -245,6 +248,42 @@ def rydberg2eV(rydberg):
         return [rydberg2eV(x) for x in rydberg]
     else:
         return rydberg * 13.605698066
+        
+def theta_z(p, q):
+  """ Returns the angle between the z axis (0,0,1) and the vector
+      formed between the two passed points p and q. Note the angle
+      is always the acute angle - this means the returned angle
+      is independent of the order of p and q. """
+      
+  v = p - q
+  theta = arccos(v[2] / norm(v)) * 180.0 / pi
+  if theta > 90.0:
+    theta -= 90.0
+  
+  return theta
+  
+def plane_z(p, q, r):
+  """ Returns the angle between the plane formed by the points p, q
+  and r, and the z axis (0,0,1). Checks for colinearity of the three
+  points and returns an error if they are collinear."""
+  
+  # Collinearity check: form two vectors from the three points,
+  # check scalar product is equal to abs dot product (e.g. parallel).
+  pq = p - q
+  pr = p - r
+  if abs(dot(pq, pr)) - norm(pq) * norm(pr) > SMALL:
+    print "Error (plane_z): Points p, q and r are collinear! Cannot form plane."
+    return -1.0
+  
+  # Generate the unit normal to the plane formed by p, q and r
+  n = cross(pq, pr)
+  n /= norm(n)
+  
+  theta = arccos(n[2]) * 180.0 / pi
+  if theta > 90.0:
+    theta -= 90.0
+  
+  return theta
         
 def uniqify(sequence, trans=None):
     """ unique = uniqify(sequence, trans)
