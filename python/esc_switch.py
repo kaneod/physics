@@ -42,6 +42,7 @@ parser = argparse.ArgumentParser(description="Switch between electronic structur
 parser.add_argument('-i', '--input_format', default='pdb', help="File format of input - aims, castep, qe or pdb.")
 parser.add_argument('-o', '--output_format', default='castep', help="File format for output - aims, castep, qe or pdb.")
 parser.add_argument('-c', '--constrain_hydrogens', default=False, dest='constrain_hydrogens', action='store_true', help="Constrain hydrogen atoms.")
+parser.add_argument('-t', '--constrain_below_threshold', type=float, default=-1.0, help="Constrain all atoms below the given z value.")
 parser.add_argument('inputfile', help="Input file.")
 parser.add_argument('outputfile', help="Output file.")
 args = parser.parse_args()
@@ -63,6 +64,16 @@ if args.constrain_hydrogens is True:
 	opts = {"constrain species" : ["H"]}
 else:
 	opts = {}
+
+if args.constrain_below_threshold > 0:
+  # Search for all atoms below the threshold.
+  atoms = []
+  for i in range(len(geom.positions)): 
+    if geom.positions[i][2] < args.constrain_below_threshold:
+      atoms.append(i)
+  opts = {"constrain atoms" : atoms}
+else:
+  opts = {}
 	
 if args.output_format == "aims":
   geom.writeAims(args.outputfile, opt=opts)
