@@ -100,17 +100,20 @@ for i in updates:
   step += 1
 
 # Finally get the final atomic structure (if it's there).
+start_block = -1
 for i, l in enumerate(lines):
   if "Final atomic structure:" in l:
     start_block = i
     break
 
-if has_unit_cell:
-  start_block += 6
-else:
-  start_block += 2
+if start_block > -1:
 
-print num_atoms
-print step
-for l in lines[start_block:start_block + num_atoms]:
-  print l.split()[4], l.split()[1], l.split()[2], l.split()[3]
+  if has_unit_cell:
+    start_block += 6
+  else:
+    start_block += 2
+
+  print num_atoms
+  print step
+  for l in lines[start_block:start_block + num_atoms]:
+    print l.split()[4], l.split()[1], l.split()[2], l.split()[3]
