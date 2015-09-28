@@ -1,6 +1,6 @@
 
 # May need to customize this.
-XS="mpirun -np 4 /opt/bin/xspectra.x -nk 4"
+XS="mpirun -np 2 /opt/bin/xspectra.x -nk 2"
 
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
