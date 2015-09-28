@@ -593,6 +593,23 @@ class Atoms:
     else:
       suffix_some_atoms = False
     
+    if "charge" in opt.keys():
+      # Note that charged is used as a template for a core-hole cell, so we add an atom type as well.
+      charged_cell = True
+      charge = opt["charge"]
+    else:
+      charged_cell = False
+      
+    if "prefix" in opt.keys():
+      prefix = opt["prefix"]
+    else:
+      prefux = "pwscf"
+    
+    if "bands" in opt.keys():
+      bands = "nbnd = " + str(opt["bands"])
+    else:
+      bands = "!nbnd = BANDS"
+    
     # This is a bit tricky. If we have QE parameters, write all the namelists first,
     # then write any cards (except atomic_species) AFTER the important cards below.
     def write_namelist(key):
@@ -613,14 +630,19 @@ class Atoms:
 
     else:
       f.write("&control\n")
-      f.write("  calculation = 'scf',\n  title = '',\n  outdir = './',\n  prefix = 'pwscf',\n  pseudo_dir = './'\n/\n")
+      f.write("  calculation = 'scf',\n  title = '',\n  outdir = './',\n  prefix = '%s',\n  pseudo_dir = './',\n  wf_collect = .true.\n/\n" % (prefix))
       f.write("&system\n")
-      f.write("  ibrav = 0,\n  nat = %d,\n  ntyp = %d,\n  ecutwfc = 50,\n  !ecutrho = 200,\n  !tot_charge=+1.0,\n  !occupations = 'fixed',\n  !degauss = 0.02,\n  nspin = 1\n/\n" % (len(self.species), len(uniqify(self.species))))
+      if charged_cell:
+        f.write("  ibrav = 0,\n  nat = %d,\n  ntyp = %d,\n  %s,\n  ecutwfc = 65,\n  ecutrho = 280,\n  tot_charge=%g,\n  occupations = 'smearing',\n  smearing = 'mv',\n  degauss = 0.0073,\n  nspin = 1\n/\n" % (len(self.species), len(uniqify(self.species))+1, bands, charge))
+      else:
+        f.write("  ibrav = 0,\n  nat = %d,\n  ntyp = %d,\n  %s,\n  ecutwfc = 65,\n  !ecutrho = 280,\n  !tot_charge=+1.0,\n  !occupations = 'fixed',\n  smearing = 'mv',\n  !degauss = 0.02,\n  nspin = 1\n/\n" % (len(self.species), len(uniqify(self.species)), bands))
       f.write("&electrons\n")
       f.write("  conv_thr = 1.0D-7\n/\n")
       f.write("&ions\n/\n")
     
-    f.write("ATOMIC_SPECIES\n")      
+    f.write("ATOMIC_SPECIES\n")
+    if charged_cell:
+      f.write("  Xh 1.0 PSEUDO_GOES_HERE\n")
     if "atomic_species" in self.parameters.keys():
       for b in self.parameters["atomic_species"]:
         f.write("  %s\n" % (b))
