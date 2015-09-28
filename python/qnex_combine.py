@@ -326,7 +326,9 @@ if args.symmetry:
     import qnex_symmetries
     symmetry_function = qnex_symmetries.symmetry_generate
   else:
-    symmetry_function = symmetry_stub
+    # If we specify symmetries and can't find the qnex_symmetries module, STOP
+    print "Error: Can't find qnex_symmetries.py in this directory. Exiting..."
+    sys.exit(0)
 else:
   symmetry_function = symmetry_stub
 
