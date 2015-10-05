@@ -3,8 +3,7 @@
 #
 # qnex_combine.py
 #
-# Given a radius in angstroms and an atomic index, adds a suffix to all atoms
-# within range of that specified atom. Handles periodic boundary conditions.
+# QE NEXAFS post-processor.
 #
 ################################################################################
 #
@@ -56,13 +55,31 @@ import sys
 import os.path
 import imp
 
+from pylab import *
+ion()
+
 Ry2eV = 13.605698066
 SMALL = 1.0e-6    			# small floating point number for equality comparisons
 DEBUG = 1								# Print debug statements
+FIX_CRYSTAL_COORDS = 0  # Use dark arts to correct a Trap For The Unwary.
 FIX_OCC_CUT_DEFECT = 1	# XSpectra's method of cutting occupied states leaves a defect,
 												# where the first point below zero eV is too large. Fix by
 												# interpolating from the surrounding points.
 NUM_POINTS = 2000   		# Number of interpolation points for combining spectra.
+
+if FIX_CRYSTAL_COORDS:
+  """ To explain this particular form of idiocy, XSpectra has a Trap For The Unwary whereby the 
+  electric field vectors are, by default, specified in *crystal* coordinates. So some scaling is
+  required to correctly get matrix elements from the computed spectra. If you make the mistake
+  of calculating the spectra with xcoordcrys=.true., you can undo the damage by entering the
+  cell dimensions below. Units don't matter as long as the ratios are right. """
+  cell_x = 15.486
+  cell_y = 15.486
+  cell_z = 27.376
+else:
+  cell_x = 1.0
+  cell_y = 1.0
+  cell_z = 1.0
 
 ######################
 #
@@ -86,6 +103,16 @@ def calculate_spectrum(evec, components):
                 (nvec[0] * nvec[1]) * components['xy'][i] + \
                 (nvec[0] * nvec[2]) * components['xz'][i] + \
                 (nvec[1] * nvec[2]) * components['yz'][i]
+                
+  if DEBUG:
+    if (spec[:,1] < -0.01).any():
+      print "Found a spectrum with negative entries for nvec = ", nvec
+      clf()
+      plot(spec[:,0], spec[:,1])
+      for s in ["xx", "yy", "zz", "xy", "xz", "yz"]:
+        plot(components['E'], components[s])
+      savefig("anegative.png")
+      clf()
   
   return spec
   
@@ -215,14 +242,23 @@ def combine_two_spectra(s1, s2, npts):
   return spec
   
 def combine_spectra(spectra, npts):
-  """ Use combine_two_spectra to combine a list of spectra arrays. """
+  """ Use combine_two_spectra to combine a list or dict of spectra arrays. """
+  
   
   if len(spectra) == 0:
-    return []
+    if type(spectra) == type([]):
+      return []
+    else:
+      return {}
   else:
-    combined = spectra.pop()
-    while len(spectra) > 0:
-      combined = combine_two_spectra(combined, spectra.pop(), npts)
+    if type(spectra) == type([]):
+      combined = spectra.pop()
+      while len(spectra) > 0:
+        combined = combine_two_spectra(combined, spectra.pop(), npts)
+    else:
+      combined = spectra.pop(spectra.keys()[-1])
+      while len(spectra) > 0:
+        combined = combine_two_spectra(combined, spectra.pop(spectra.keys()[-1]), npts)      
     return combined 
   
   
@@ -262,8 +298,9 @@ parser = argparse.ArgumentParser(description="Take XSpectra output from multiple
 
 parser.add_argument('atoms', type=int, nargs="+", help="Indices of atomic absorber sites.")
 parser.add_argument('--sites', '-s', dest='sites', action='store_true', default=False, help="Output combined spectra for each individual atomic site.")
-parser.add_argument('--angles', '-a', dest='angles', action='store_true', default=False, help="Generate 20, 35, 55, 75, 90 degree spectra instead of components.")
+parser.add_argument('--angles', '-a', dest='angles', action='store_true', default=False, help="Generate 20, 40, 55, 70, 90 degree spectra instead of components.")
 parser.add_argument('--symmetry', '-y', dest='symmetry', action='store_true', default=False, help="Look for symmetries function and apply symmetries.")
+parser.add_argument('--energy_units_ev', '-u', dest='units', action='store_true', default=False, help="Assume energies in total_energies file in eV not Ry.")
 args = parser.parse_args()
 
 if DEBUG:
@@ -272,7 +309,8 @@ if DEBUG:
   print "sites = ", args.sites
   print "angles = ", args.angles
   print "symmetry = ", args.symmetry
-  
+  print "units eV = ", args.units
+
 # Init task: check atoms input is valid/remove duplicates.
 indices = set(args.atoms)
 
@@ -288,7 +326,9 @@ if args.symmetry:
     import qnex_symmetries
     symmetry_function = qnex_symmetries.symmetry_generate
   else:
-    symmetry_function = symmetry_stub
+    # If we specify symmetries and can't find the qnex_symmetries module, STOP
+    print "Error: Can't find qnex_symmetries.py in this directory. Exiting..."
+    sys.exit(0)
 else:
   symmetry_function = symmetry_stub
 
@@ -323,9 +363,17 @@ for i in indices:
   this_atom['xx'] = atoms[i]['100'][:,1]
   this_atom['yy'] = atoms[i]['010'][:,1]
   this_atom['zz'] = atoms[i]['001'][:,1]
-  this_atom['xy'] = 2.0 * atoms[i]['110'][:,1] - atoms[i]['100'][:,1] - atoms[i]['010'][:,1]
-  this_atom['xz'] = 2.0 * atoms[i]['101'][:,1] - atoms[i]['100'][:,1] - atoms[i]['001'][:,1]
-  this_atom['yz'] = 2.0 * atoms[i]['011'][:,1] - atoms[i]['010'][:,1] - atoms[i]['001'][:,1]
+  
+  # This is where the Trap For The Unwary comes in.
+  evec = array([cell_x, cell_y, 0]) / sqrt(cell_x ** 2 + cell_y ** 2)
+  this_atom['xy'] = 1.0 / (evec[0] * evec[1]) * (atoms[i]['110'][:,1] - (evec[0] ** 2) * atoms[i]['100'][:,1] - (evec[1] ** 2) * atoms[i]['010'][:,1])
+  
+  evec = array([cell_x, 0, cell_z]) / sqrt(cell_x ** 2 + cell_z ** 2)
+  this_atom['xz'] = 1.0 / (evec[0] * evec[2]) * (atoms[i]['101'][:,1] - (evec[0] ** 2) * atoms[i]['100'][:,1] - (evec[2] ** 2) * atoms[i]['001'][:,1])
+  
+  evec = array([0, cell_y, cell_z]) / sqrt(cell_y ** 2 + cell_z ** 2)
+  this_atom['yz'] = 1.0 / (evec[1] * evec[2]) * (atoms[i]['011'][:,1] - (evec[1] ** 2) * atoms[i]['010'][:,1] - (evec[2] ** 2) * atoms[i]['001'][:,1])
+  
   atom_components[i] = this_atom
 
 # Regardless of whether we want output as components or angles, we have to have everything
@@ -338,7 +386,10 @@ if os.path.isfile("total_energies"):
   f.close()
   total_energies = {}
   for l in lines:
-    total_energies[l.split()[0]] = float(l.split()[1]) * Ry2eV
+    if args.units:
+      total_energies[l.split()[0]] = float(l.split()[1])
+    else:
+      total_energies[l.split()[0]] = float(l.split()[1]) * Ry2eV
   # We need the ground state to get a decent transition energies, otherwise just use the average
   # of the energies and the difference as the shift.
   transitions = {}
@@ -416,27 +467,40 @@ if not args.angles:
 # angles for all atomic sites, so we do that first.
 
 if args.angles:
-  base_vecs = [spherical_to_cartesian(45,20), spherical_to_cartesian(45, 35), spherical_to_cartesian(45,55), spherical_to_cartesian(45,75), spherical_to_cartesian(45,90)]
-  base_names = ["20", "35", "55", "75", "90"]
+  base_vecs = [spherical_to_cartesian(45,20), spherical_to_cartesian(45, 40), spherical_to_cartesian(45,55), spherical_to_cartesian(45,70), spherical_to_cartesian(45,90)]
+  base_names = ["20", "40", "55", "70", "90"]
+  
+  if DEBUG:
+    print "Computing angled spectra. Vectors are:"
+    for v in base_vecs:
+      print v
+  
   
   # Treat each angle separately even if combining atomic sites.
   for v,b in zip(base_vecs, base_names):
     sym_vecs = symmetry_function(v)
     # Some of these might be duplicates, so we have to prune the list.
-    sym_vecs = prune_duplicate_vectors(sym_vecs)
+    #sym_vecs = prune_duplicate_vectors(sym_vecs)
     # For each symmetry vector, need a spectrum for each site. Since we always add the 
     # symmetry-related spectra, there is no need to store separately - just add them 
     # together as they are calculated.
-    atomic_spectra = []
+    atomic_spectra = {}
+    clf()
     for i in indices:
       tmp_specs = []
       for v in sym_vecs:
         tmp_specs.append(calculate_spectrum(v, atom_components[i]))
       # There might be a different number of symmetry vectors for difference angles,
       # so normalize by the number of vectors in the set.
+      if DEBUG:
+        # Plot and save each tmpspec
+        for t in tmp_specs:
+          plot(t[:,0], t[:,1])
+        savefig("atom%d_%s.png" % (i,b))
       combined = combine_spectra(tmp_specs, NUM_POINTS)
-      combined[:,1] /= len(sym_vecs)
-      atomic_spectra.append(combined)
+      #combined[:,1] /= len(sym_vecs)
+      atomic_spectra[i] = combined
+      clf()
     
     # If we want site-specific output, do this now.
     if args.sites:
