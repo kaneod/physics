@@ -1159,7 +1159,7 @@ class Atoms:
       return False
 
     f = open(filename, 'w')
-    f.write("# geometry.in written by esc_lib.py\n\n")
+    f.write("# geometry.in written by esc_tools.py\n\n")
     if xtype == "ang":  
       if avec is not None:
         for l in avec:
@@ -1174,7 +1174,7 @@ class Atoms:
         f.write("atom  %4.8g %4.8g %4.8g %s\n" % (p[0], p[1], p[2], s))
         if add_corehole and (i == corehole_index):
           # Put an initial spin on the atom with the core hole.
-    	  f.write("initial_moment 1.0\n")
+          f.write("initial_moment 1.0\n")
         if index_constraints and i in opt["constrain atoms"]:
           f.write("  constrain_relaxation .true.\n")
         elif species_constraints and s in opt["constrain species"]:
@@ -1194,7 +1194,7 @@ class Atoms:
         f.write("atom_frac  %4.8g %4.8g %4.8g %s\n" % (p[0], p[1], p[2], s))
         if add_corehole and (i == corehole_index):
           # Put an initial spin on the atom with the core hole.
-    	  f.write("initial_moment 1.0\n")
+          f.write("initial_moment 1.0\n")
         if index_constraints and i in opt["constrain atoms"]:
           f.write("  constrain_relaxation .true.\n")
         elif species_constraints and elements[spec[i]] in constraint_list_species:
