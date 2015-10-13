@@ -56,7 +56,7 @@ from math import floor
 
 Ry2eV = 13.605698066
 SMALL = 1.0e-6    			# small floating point number for equality comparisons
-DEBUG = 1	
+DEBUG = 0	
 
 valid_commands = ["homo", \
                   "lumo", \
