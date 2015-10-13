@@ -300,7 +300,8 @@ parser.add_argument('atoms', type=int, nargs="+", help="Indices of atomic absorb
 parser.add_argument('--sites', '-s', dest='sites', action='store_true', default=False, help="Output combined spectra for each individual atomic site.")
 parser.add_argument('--angles', '-a', dest='angles', action='store_true', default=False, help="Generate 20, 40, 55, 70, 90 degree spectra instead of components.")
 parser.add_argument('--symmetry', '-y', dest='symmetry', action='store_true', default=False, help="Look for symmetries function and apply symmetries.")
-parser.add_argument('--energy_units_ev', '-u', dest='units', action='store_true', default=False, help="Assume energies in total_energies file in eV not Ry.")
+parser.add_argument('--energy_units_ry', '-u', dest='units', action='store_true', default=False, help="Assume energies in total_energies file in Ry not eV.")
+parser.add_argument('--metal', '-m', dest='metal', action='store_true', default=False, help="Specify if the system has no homo-lumo gap (frontier_levels will be ignored).")
 args = parser.parse_args()
 
 if DEBUG:
@@ -309,7 +310,8 @@ if DEBUG:
   print "sites = ", args.sites
   print "angles = ", args.angles
   print "symmetry = ", args.symmetry
-  print "units eV = ", args.units
+  print "units Ry = ", args.units
+  print "is metal = ", args.metal
 
 # Init task: check atoms input is valid/remove duplicates.
 indices = set(args.atoms)
@@ -387,9 +389,9 @@ if os.path.isfile("total_energies"):
   total_energies = {}
   for l in lines:
     if args.units:
-      total_energies[l.split()[0]] = float(l.split()[1])
-    else:
       total_energies[l.split()[0]] = float(l.split()[1]) * Ry2eV
+    else:
+      total_energies[l.split()[0]] = float(l.split()[1])
   # We need the ground state to get a decent transition energies, otherwise just use the average
   # of the energies and the difference as the shift.
   transitions = {}
@@ -407,12 +409,12 @@ if os.path.isfile("total_energies"):
       transitions[i] = total_energies[str(i)] - ground
   # Now we need the difference between the HOMO and LUMO and subtract this off the
   # existing transitions.
-  if os.path.isfile("frontier_levels"):
+  if os.path.isfile("frontier_levels") and not args.metal:
     tmp = {}
     f = open("frontier_levels", 'r')
     lines = f.readlines()
     f.close()
-    for l in lines:
+    for l in lines: 
     	tmp[l.split()[0]] = float(l.split()[2]) - float(l.split()[1]) # Elumo - Ehomo
     for i in indices:
       transitions[i] -= tmp[str(i)]
