@@ -447,7 +447,7 @@ class Atoms:
       namelist_lines = []
       j = start + 1
       while data[j].strip().lower()[0] != '/':
-        namelist_lines.append(data[j].strip().lower())
+        namelist_lines.append(data[j].strip())
         j += 1
       params = {}
       namelist_contents = "".join(namelist_lines).split(',')
@@ -455,7 +455,7 @@ class Atoms:
       if DEBUG:
         print "namelist_contents is '%s'" % (namelist_contents)
       for param in namelist_contents:
-        param_name = param.split("=")[0].strip()
+        param_name = param.split("=")[0].strip().lower()
         param_value = param.split("=")[1].strip()
         params[param_name] = param_value
       self.parameters[namelist_name] = params
